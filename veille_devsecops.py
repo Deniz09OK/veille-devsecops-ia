@@ -18,32 +18,39 @@ WEBHOOK_DISCORD = (os.getenv("WEBHOOK_DISCORD") or "").strip()
 FT_CLIENT_ID = (os.getenv("FT_CLIENT_ID") or "").strip()
 FT_CLIENT_SECRET = (os.getenv("FT_CLIENT_SECRET") or "").strip()
 
-FICHIER_HISTORIQUE = "historique_offres.json"
+# --------------------------------------------------------------------------
+# ID DE GROUPE (pour l'exécution parallèle en jobs matrix GitHub Actions)
+# --------------------------------------------------------------------------
+# Quand le script tourne dans plusieurs jobs en parallèle (un par groupe de
+# mots-clés), chaque job doit écrire dans SES PROPRES fichiers d'état
+# (historique, mémoire vectorielle, Excel, rapport) pour ne jamais se marcher
+# dessus. GROUPE_ID sert de suffixe à tous ces chemins. En local (sans variable
+# d'env définie), le comportement d'origine est conservé ("default", pas de
+# suffixe visible dans le nom du dossier Historique).
+GROUPE_ID = (os.getenv("GROUPE_ID") or "default").strip()
+
+FICHIER_HISTORIQUE = f"historique_offres_{GROUPE_ID}.json" if GROUPE_ID != "default" else "historique_offres.json"
 JOURS_MEMOIRE = 14
 MODELE_IA = "llama3.2"
-
-# Second modèle indépendant utilisé pour vérifier les offres à fort score
-# (voir SEUIL_CANDIDATURE plus bas). Doit être installé au préalable :
-#   ollama pull qwen2.5:7b
-# Tu peux remplacer par "mistral" si tu préfères un modèle plus léger.
 MODELE_IA_VALIDATION = "qwen2.5:7b"
 
 PROFIL_CANDIDAT = """
-        - Sécurité : Metasploit, Burp Suite, Nmap, Hydra, Wireshark, John the Ripper, Gobuster, Kali Linux.
-        - DevOps/Infra : Docker, Kubernetes, Jenkins, GitLab CI/CD, Traefik, Linux, Windows.
-        - Réseau : Configuration routeurs et switches.
-        - Dev/Design : Vite, Figma, Tailwind CSS.
+- Sécurité : Metasploit, Burp Suite, Nmap, Hydra, Wireshark, John the Ripper, Gobuster, Kali Linux.
+- DevOps/Infra : Docker, Kubernetes, Jenkins, GitLab CI/CD, Traefik, Linux, Windows.
+- Réseau : Configuration routeurs et switches.
+- Dev/Design : Vite, Figma, Tailwind CSS.
 """.strip()
 
 nom_dossier_jour = datetime.now().strftime("%Y%m%d")
-chemin_archivage = os.path.join("Historique", nom_dossier_jour)
+chemin_archivage = os.path.join("Historique", nom_dossier_jour, GROUPE_ID) if GROUPE_ID != "default" else os.path.join("Historique", nom_dossier_jour)
 os.makedirs(chemin_archivage, exist_ok=True)
 FICHIER_RAPPORT = os.path.join(chemin_archivage, "rapport_alternances.md")
 
 # ==========================================
 # MÉMOIRE VECTORIELLE DE L'IA (ChromaDB)
 # ==========================================
-client_chroma = chromadb.PersistentClient(path="./memoire_ia")
+chemin_memoire_ia = f"./memoire_ia_{GROUPE_ID}" if GROUPE_ID != "default" else "./memoire_ia"
+client_chroma = chromadb.PersistentClient(path=chemin_memoire_ia)
 collection_ia = client_chroma.get_or_create_collection(name="memoire_devsecops")
 
 # ==========================================
@@ -52,7 +59,7 @@ collection_ia = client_chroma.get_or_create_collection(name="memoire_devsecops")
 # Il suffit d'ajouter/retirer un intitulé dans cette liste : toutes les
 # plateformes (scraping) et l'API France Travail seront interrogées
 # automatiquement pour chaque mot-clé, sans dupliquer d'URL à la main.
-MOTS_CLES = [
+MOTS_CLES_COMPLETS = [
     "SecOps",
     "Cloud Security Engineer",
     "Ingénieur SecOps",
@@ -67,6 +74,24 @@ MOTS_CLES = [
     "Ingénieur Système et Réseau",
     "Ingénieur de Production IT et Release Engineer",
 ]
+
+# --------------------------------------------------------------------------
+# FILTRE DE MOTS-CLÉS (pour l'exécution parallèle en jobs matrix)
+# --------------------------------------------------------------------------
+# Si la variable d'environnement MOTS_CLES_GROUPE est définie (liste séparée
+# par des virgules), seuls ces mots-clés sont traités par cette exécution du
+# script. Permet de répartir MOTS_CLES_COMPLETS sur plusieurs jobs parallèles
+# dans le workflow GitHub Actions, chacun avec son propre timeout, plutôt que
+# de tout traiter séquentiellement dans un seul job de 340 minutes.
+_filtre_env = os.getenv("MOTS_CLES_GROUPE")
+if _filtre_env:
+    _mots_demandes = [m.strip() for m in _filtre_env.split(",") if m.strip()]
+    MOTS_CLES = [m for m in MOTS_CLES_COMPLETS if m in _mots_demandes]
+    if not MOTS_CLES:
+        print(f"⚠️ Aucun des mots-clés demandés ({_mots_demandes}) ne correspond à MOTS_CLES_COMPLETS. Arrêt.")
+        MOTS_CLES = []
+else:
+    MOTS_CLES = MOTS_CLES_COMPLETS
 
 LOCALISATION = "Nancy"
 
@@ -139,7 +164,6 @@ def generer_sources_scraping(mots_cles: list[str], localisation: str) -> list[di
     mais généré automatiquement)."""
     loc_encodee = urllib.parse.quote_plus(localisation)
     sources_finales = []
-
     for template in SOURCES_TEMPLATES:
         for mot in mots_cles:
             if template["nom"] == "Choose Your Boss":
@@ -155,17 +179,15 @@ def generer_sources_scraping(mots_cles: list[str], localisation: str) -> list[di
                 "aimant_css": template["aimant_css"],
                 "domaine": template["domaine"],
             })
-
     return sources_finales
+
 
 # ==========================================
 # FONCTIONS UTILITAIRES & DISCORD
 # ==========================================
-
 def envoyer_discord(titre, lien, match_tech):
     if not WEBHOOK_DISCORD or WEBHOOK_DISCORD == "VOTRE_WEBHOOK_ICI":
         return
-
     data = {
         "content": f"🚨 **Nouvelle offre DevSecOps validée !**\n**Poste:** {titre}\n**Score Technique:** {match_tech}\n**Lien:** {lien}"
     }
@@ -173,6 +195,7 @@ def envoyer_discord(titre, lien, match_tech):
         requests.post(WEBHOOK_DISCORD, json=data)
     except Exception as e:
         print(f"⚠️ Erreur d'envoi Discord : {e}")
+
 
 def charger_historique() -> dict:
     if not os.path.exists(FICHIER_HISTORIQUE):
@@ -185,9 +208,11 @@ def charger_historique() -> dict:
     limite = datetime.now() - timedelta(days=JOURS_MEMOIRE)
     return {url: date for url, date in historique.items() if datetime.fromisoformat(date) >= limite}
 
+
 def ecrire_historique(historique: dict):
     with open(FICHIER_HISTORIQUE, "w", encoding="utf-8") as f:
         json.dump(historique, f, indent=4, ensure_ascii=False)
+
 
 def normaliser_url_offre(url: str) -> str:
     """Nettoie l'URL d'une offre pour en faire une clé stable de déduplication.
@@ -218,6 +243,7 @@ def normaliser_url_offre(url: str) -> str:
     # détail est déjà stable par offre, on la garde telle quelle.
     return url
 
+
 def normaliser_champ(valeur) -> str:
     if valeur is None:
         return "N/A"
@@ -231,6 +257,7 @@ def normaliser_champ(valeur) -> str:
         return ", ".join(normaliser_champ(v) for v in valeur)
     return str(valeur).strip()
 
+
 def extraire_note(champ: str) -> float:
     # On autorise les décimales en remplaçant la virgule par un point
     texte = normaliser_champ(champ).replace(',', '.')
@@ -240,35 +267,18 @@ def extraire_note(champ: str) -> float:
     except:
         return 0.0
 
-def valider_match_tech(valeur) -> str:
-    """Filet de sécurité : un petit modèle local recopie parfois le
-    placeholder "N/10" du prompt au lieu de calculer une vraie note (le "N"
-    n'étant qu'un exemple de format). On vérifie que la partie avant le "/"
-    est bien un nombre ; si ce n'est pas le cas (ex: "N/10", "N/A"), on
-    retombe sur "5/10" par défaut plutôt que de laisser une valeur invalide
-    se propager jusqu'au rapport, à l'Excel ou à l'alerte Discord."""
-    texte = normaliser_champ(valeur)
-    partie_note = texte.split('/')[0].strip().replace(',', '.')
-    try:
-        float(partie_note)
-        return texte
-    except ValueError:
-        print(f"   ⚠️ Note IA invalide reçue ('{texte}') -> valeur par défaut appliquée (5/10)")
-        return "5/10"
 
 # ==========================================
 # FILTRE LOGISTIQUE PYTHON
 # ==========================================
-
 def filtre_logistique(texte_brut) -> bool:
     if not texte_brut:
         return False
-
     texte = texte_brut.lower()
 
     ecoles_interdites = ["iscod", "iscode", "cesi", "openclassrooms", "sup de vinci", "my digital school", "epsi"]
     if any(ecole in texte for ecole in ecoles_interdites):
-        return False 
+        return False
 
     mots_valides = ["nancy", "télétravail", "remote", "full-remote", "télétravail total", "54000", "meurthe-et-moselle"]
     mots_interdits = ["paris", "boulogne", "lyon", "toulouse", "bordeaux", "nantes", "lille"]
@@ -278,10 +288,10 @@ def filtre_logistique(texte_brut) -> bool:
 
     return any(mot in texte for mot in mots_valides)
 
+
 # ==========================================
 # MOTEUR 1 : API FRANCE TRAVAIL
 # ==========================================
-
 def obtenir_token_france_travail() -> str | None:
     url_token = "https://entreprise.francetravail.fr/connexion/oauth2/access_token?realm=%2Fpartenaire"
     headers_token = {"Content-Type": "application/x-www-form-urlencoded"}
@@ -299,10 +309,8 @@ def obtenir_token_france_travail() -> str | None:
             "scope": scope,
         }
         req_token = requests.post(url_token, headers=headers_token, data=data_token)
-
         if req_token.status_code == 200:
             return req_token.json().get("access_token")
-
     return None
 
 
@@ -349,10 +357,10 @@ def recuperer_offres_france_travail(recherches_ft: list[tuple[str, str]]):
 
     return list(offres_uniques.values())
 
+
 # ==========================================
 # MOTEUR 2 : SCRAPING PLAYWRIGHT
 # ==========================================
-
 def extraire_liens(page, config) -> list[str]:
     print(f"📂 Scraping sur : {config['nom']}")
     try:
@@ -371,6 +379,7 @@ def extraire_liens(page, config) -> list[str]:
                 liens_propres.append(url)
     return liens_propres
 
+
 def lire_texte_offre(contexte, url: str) -> str | None:
     page_offre = contexte.new_page()
     try:
@@ -382,13 +391,12 @@ def lire_texte_offre(contexte, url: str) -> str | None:
     finally:
         page_offre.close()
 
+
 # ==========================================
 # ANALYSE IA (RAG + Mémoire Vectorielle)
 # ==========================================
-
 def analyser_technique_ia(texte_offre: str, url_offre: str) -> dict | None:
     print("   🧠 Vectorisation de l'offre pour interroger la mémoire...")
-
     try:
         # On limite le texte pour ne pas saturer le modèle d'embedding
         vecteur_actuel = ollama.embeddings(model='nomic-embed-text', prompt=texte_offre[:3000])['embedding']
@@ -405,77 +413,63 @@ def analyser_technique_ia(texte_offre: str, url_offre: str) -> dict | None:
                 vieux_score = resultats['metadatas'][0][0].get('score', 'Inconnu')
                 vieux_verdict = resultats['metadatas'][0][0].get('verdict', 'Inconnu')
                 print(f"   💡 Souvenir trouvé ! (Distance: {distance:.0f}). Injection dans la réflexion de l'IA...")
-
                 contexte_memoire = f"""
-                --- MÉMOIRE D'UNE OFFRE SIMILAIRE DU PASSÉ ---
-                Pour t'aider à être cohérent, sache que tu as déjà évalué une offre techniquement très similaire par le passé.
-                - La note que tu avais donnée : {vieux_score}
-                - Le verdict que tu avais rendu : "{vieux_verdict}"
-                Sers-toi de ce contexte pour évaluer cette NOUVELLE offre avec la même rigueur.
-                ----------------------------------------------
-                """
+--- MÉMOIRE D'UNE OFFRE SIMILAIRE DU PASSÉ ---
+Pour t'aider à être cohérent, sache que tu as déjà évalué une offre techniquement très similaire par le passé.
+- La note que tu avais donnée : {vieux_score}
+- Le verdict que tu avais rendu : "{vieux_verdict}"
+Sers-toi de ce contexte pour évaluer cette NOUVELLE offre avec la même rigueur.
+----------------------------------------------
+"""
 
         # Le prompt a été mis à jour pour obliger l'IA à séparer le titre et l'entreprise
         prompt = f"""
-        Analyse l'OFFRE d'alternance ci-dessous pour un candidat étudiant en MSc
-        Cybersécurité & Cloud à Epitech Nancy (promotion 2027), spécialisé en
-        cybersécurité et développement web.
+Analyse l'OFFRE d'alternance ci-dessous pour un candidat étudiant en MSc
+Cybersécurité & Cloud à Epitech Nancy (promotion 2027), spécialisé en
+cybersécurité et développement web.
 
-        Profil du candidat :
-        {PROFIL_CANDIDAT}
+Profil du candidat :
+{PROFIL_CANDIDAT}
 
-        {contexte_memoire}
+{contexte_memoire}
 
-        Réponds UNIQUEMENT avec un objet JSON valide contenant ces clés exactes.
-        IMPORTANT :
-        - Chaque valeur doit être une simple chaîne de caractères (jamais un objet
-          ni une liste imbriquée).
-        - "match_tech" doit être une VRAIE note numérique que TU calcules,
-          au format "X/10" où X est un chiffre ou un nombre décimal (exemples
-          valides : "7/10", "8.5/10", "3/10"). N'écris JAMAIS littéralement
-          "N/10" : le "N" n'est qu'un exemple de format, pas une valeur à copier.
-        {{
-            "titre_poste": "Intitulé du poste",
-            "nom_entreprise": "Nom de l'entreprise (ou 'Non précisé')",
-            "match_tech": "7/10",
-            "points_forts": "Outils du candidat explicitement mentionnés, sous forme de texte simple",
-            "a_decouvrir": "Technologies demandées que le candidat ne maîtrise pas encore, sous forme de texte simple",
-            "verdict": "Verdict technique final en une phrase"
-        }}
+Réponds UNIQUEMENT avec un objet JSON valide contenant ces clés exactes.
+IMPORTANT : chaque valeur doit être une simple chaîne de caractères
+(jamais un objet ni une liste imbriquée) :
+{{
+  "titre_poste": "Intitulé du poste",
+  "nom_entreprise": "Nom de l'entreprise (ou 'Non précisé')",
+  "match_tech": "N/10",
+  "points_forts": "Outils du candidat explicitement mentionnés, sous forme de texte simple",
+  "a_decouvrir": "Technologies demandées que le candidat ne maîtrise pas encore, sous forme de texte simple",
+  "verdict": "Verdict technique final en une phrase"
+}}
 
-        Texte de l'offre :
-        {texte_offre[:4000]}
-        """
-
-        # Température basse : on veut une note fiable et un format respecté,
-        # pas de créativité. Réduit fortement le risque que le modèle
-        # recopie le placeholder du prompt au lieu de calculer une vraie note.
-        reponse = ollama.chat(
-            model=MODELE_IA,
-            messages=[{"role": "user", "content": prompt}],
-            format="json",
-            options={"temperature": 0.2},
-        )
+Texte de l'offre :
+{texte_offre[:4000]}
+"""
+        reponse = ollama.chat(model=MODELE_IA, messages=[{"role": "user", "content": prompt}], format="json")
         analyse = json.loads(reponse["message"]["content"])
-        analyse["match_tech"] = valider_match_tech(analyse.get("match_tech"))
 
         collection_ia.upsert(
-            ids=[url_offre], 
+            ids=[url_offre],
             embeddings=[vecteur_actuel],
             documents=[texte_offre],
             metadatas=[{"score": analyse.get("match_tech", "0"), "verdict": analyse.get("verdict", "")}]
         )
+
         return analyse
     except Exception as e:
         print(f"   ⚠️ Erreur lors de l'analyse IA : {e}")
         return None
 
+
 # ==========================================
 # GÉNÉRATION DE CANDIDATURE (Message LinkedIn + Lettre)
 # ==========================================
-
 # Seuil à partir duquel une ébauche de candidature est générée automatiquement.
 SEUIL_CANDIDATURE = 8.0
+
 
 def generer_candidature_ia(analyse: dict, texte_offre: str) -> dict:
     """Pour les offres avec un excellent match technique (score >= SEUIL_CANDIDATURE),
@@ -489,33 +483,32 @@ def generer_candidature_ia(analyse: dict, texte_offre: str) -> dict:
         a_decouvrir = normaliser_champ(analyse.get("a_decouvrir"))
 
         prompt = f"""
-        Tu es un étudiant en MSc Cybersécurité & Cloud à Epitech Nancy (promotion 2027),
-        spécialisé en cybersécurité et développement web, à la recherche d'une alternance.
-        Tu postules au poste "{titre_poste}" chez {entreprise}.
+Tu es un étudiant en MSc Cybersécurité & Cloud à Epitech Nancy (promotion 2027),
+spécialisé en cybersécurité et développement web, à la recherche d'une alternance.
 
-        Points forts déjà identifiés pour cette offre : {points_forts}
-        Technologies à mentionner comme axes d'apprentissage motivés : {a_decouvrir}
+Tu postules au poste "{titre_poste}" chez {entreprise}.
+Points forts déjà identifiés pour cette offre : {points_forts}
+Technologies à mentionner comme axes d'apprentissage motivés : {a_decouvrir}
 
-        Extrait de l'offre :
-        {texte_offre[:2000]}
+Extrait de l'offre :
+{texte_offre[:2000]}
 
-        Rédige deux textes :
-        1. "message_linkedin" : un message d'accroche court (3 à 4 phrases), ton direct
-           et motivé, sans formule creuse type "Je me permets de vous contacter".
-           Doit mentionner le poste, un point fort concret, et une question ou un appel
-           à l'échange.
-        2. "lettre_motivation" : une ébauche de paragraphe d'accroche de lettre de
-           motivation (5 à 6 phrases), qui met en avant les points forts ci-dessus et
-           montre une réelle envie d'apprendre les technologies manquantes.
+Rédige deux textes :
+1. "message_linkedin" : un message d'accroche court (3 à 4 phrases), ton direct
+   et motivé, sans formule creuse type "Je me permets de vous contacter".
+   Doit mentionner le poste, un point fort concret, et une question ou un appel
+   à l'échange.
+2. "lettre_motivation" : une ébauche de paragraphe d'accroche de lettre de
+   motivation (5 à 6 phrases), qui met en avant les points forts ci-dessus et
+   montre une réelle envie d'apprendre les technologies manquantes.
 
-        Réponds UNIQUEMENT avec un objet JSON valide contenant ces clés exactes,
-        chaque valeur étant une simple chaîne de caractères (jamais un objet imbriqué) :
-        {{
-            "message_linkedin": "...",
-            "lettre_motivation": "..."
-        }}
-        """
-
+Réponds UNIQUEMENT avec un objet JSON valide contenant ces clés exactes,
+chaque valeur étant une simple chaîne de caractères (jamais un objet imbriqué) :
+{{
+  "message_linkedin": "...",
+  "lettre_motivation": "..."
+}}
+"""
         reponse = ollama.chat(model=MODELE_IA, messages=[{"role": "user", "content": prompt}], format="json")
         candidature = json.loads(reponse["message"]["content"])
 
@@ -527,10 +520,10 @@ def generer_candidature_ia(analyse: dict, texte_offre: str) -> dict:
         print(f"   ⚠️ Erreur lors de la génération de la candidature : {e}")
         return {"message_linkedin": "", "lettre_motivation": ""}
 
+
 # ==========================================
 # VÉRIFICATION CROISÉE PAR UN SECOND MODÈLE IA
 # ==========================================
-
 def verifier_avec_second_modele(texte_offre: str) -> dict:
     """Fait évaluer la MÊME offre par un second modèle IA (MODELE_IA_VALIDATION),
     de façon totalement indépendante (pas d'accès à la mémoire RAG du premier
@@ -539,39 +532,29 @@ def verifier_avec_second_modele(texte_offre: str) -> dict:
     une candidature basée sur un score qui pourrait être un biais isolé."""
     try:
         prompt = f"""
-        Tu es un recruteur technique expert en Cybersécurité et DevSecOps.
-        Analyse l'OFFRE d'alternance ci-dessous pour un candidat étudiant en MSc
-        Cybersécurité & Cloud à Epitech Nancy (promotion 2027), spécialisé en
-        cybersécurité et développement web.
+Tu es un recruteur technique expert en Cybersécurité et DevSecOps.
 
-        Profil du candidat :
-        {PROFIL_CANDIDAT}
+Analyse l'OFFRE d'alternance ci-dessous pour un candidat étudiant en MSc
+Cybersécurité & Cloud à Epitech Nancy (promotion 2027), spécialisé en
+cybersécurité et développement web.
 
-        Réponds UNIQUEMENT avec un objet JSON valide contenant ces clés exactes,
-        chaque valeur étant une simple chaîne de caractères. "match_tech" doit
-        être une VRAIE note numérique que TU calcules, au format "X/10" où X
-        est un chiffre ou un nombre décimal (exemples valides : "7/10",
-        "8.5/10", "3/10"). N'écris JAMAIS littéralement "N/10" : le "N" n'est
-        qu'un exemple de format, pas une valeur à copier.
-        {{
-            "match_tech": "6.5/10",
-            "verdict": "Verdict technique final en une phrase"
-        }}
+Profil du candidat :
+{PROFIL_CANDIDAT}
 
-        Texte de l'offre :
-        {texte_offre[:4000]}
-        """
+Réponds UNIQUEMENT avec un objet JSON valide contenant ces clés exactes,
+chaque valeur étant une simple chaîne de caractères :
+{{
+  "match_tech": "N/10",
+  "verdict": "Verdict technique final en une phrase"
+}}
 
-        reponse = ollama.chat(
-            model=MODELE_IA_VALIDATION,
-            messages=[{"role": "user", "content": prompt}],
-            format="json",
-            options={"temperature": 0.2},
-        )
+Texte de l'offre :
+{texte_offre[:4000]}
+"""
+        reponse = ollama.chat(model=MODELE_IA_VALIDATION, messages=[{"role": "user", "content": prompt}], format="json")
         resultat = json.loads(reponse["message"]["content"])
-
         return {
-            "match_tech": valider_match_tech(resultat.get("match_tech", "0")),
+            "match_tech": normaliser_champ(resultat.get("match_tech", "0")),
             "verdict": normaliser_champ(resultat.get("verdict", "")),
         }
     except Exception as e:
@@ -584,10 +567,8 @@ def comparer_avis_modeles(score_1: float, score_2) -> str:
     de façon lisible dans le rapport et l'Excel."""
     if score_2 is None:
         return "N/A (second modèle indisponible)"
-
     score_2 = extraire_note(score_2)
     ecart = abs(score_1 - score_2)
-
     if ecart <= 1:
         return f"✅ Accord (écart {ecart:.1f} pt)"
     elif ecart <= 2.5:
@@ -595,35 +576,38 @@ def comparer_avis_modeles(score_1: float, score_2) -> str:
     else:
         return f"⚠️ Désaccord fort ({ecart:.1f} pts) — à vérifier manuellement"
 
+
 # ==========================================
 # CŒUR DU PROGRAMME
 # ==========================================
+print(f"🚀 Démarrage de l'Agent IA DevSecOps (API + Scraping + RAG ChromaDB + Excel) — Groupe : {GROUPE_ID}...")
 
-print("🚀 Démarrage de l'Agent IA DevSecOps (API + Scraping + RAG ChromaDB + Excel)...")
+if not MOTS_CLES:
+    print("⚠️ Liste de mots-clés vide, arrêt du script.")
+    raise SystemExit(0)
 
 historique = charger_historique()
 offres_regroupees = {}
 
 SOURCES_RECHERCHE = generer_sources_scraping(MOTS_CLES, LOCALISATION)
 RECHERCHES_FT = generer_recherches_ft(MOTS_CLES)
+
 print(f"🔑 {len(MOTS_CLES)} mot(s)-clé configuré(s) -> {len(SOURCES_RECHERCHE)} recherches de scraping / {len(RECHERCHES_FT)} recherches API France Travail générées.")
 
 # --- 1. TRAITEMENT API FRANCE TRAVAIL ---
 offres_ft = recuperer_offres_france_travail(RECHERCHES_FT)
+
 for offre in offres_ft:
     url_offre = normaliser_url_offre(offre.get("origineOffre", {}).get("urlOrigine", ""))
     if url_offre and url_offre not in historique:
         texte_complet = offre.get("description", "")
-
         if filtre_logistique(texte_complet) or "54" in str(offre.get("lieuTravail", {}).get("codePostal", "")):
             print(f"🧠 Analyse IA de l'offre FT : {offre.get('intitule', '')[:30]}")
             analyse = analyser_technique_ia(texte_complet, url_offre)
-
             if analyse and "titre_poste" in analyse:
                 titre = normaliser_champ(analyse.get("titre_poste", "Poste Inconnu"))
                 entreprise = normaliser_champ(analyse.get("nom_entreprise", "Non précisé"))
                 cle = f"{titre} - {entreprise}"
-
                 analyse["match_logistique"] = "10/10 (Validé par filtre Python)"
 
                 score_1 = extraire_note(analyse.get("match_tech"))
@@ -641,8 +625,8 @@ for offre in offres_ft:
                     offres_regroupees[cle]["liens"].append(url_offre)
                 else:
                     offres_regroupees[cle] = {"donnees_ia": analyse, "liens": [url_offre]}
-                    envoyer_discord(cle, url_offre, analyse.get("match_tech", "N/A"))
 
+                envoyer_discord(cle, url_offre, analyse.get("match_tech", "N/A"))
         historique[url_offre] = datetime.now().isoformat()
 
 # --- 2. TRAITEMENT PLAYWRIGHT (Scraping) ---
@@ -670,12 +654,10 @@ with sync_playwright() as p:
             if filtre_logistique(texte_brut):
                 print(f"🧠 Analyse IA (Scraping) : {url.split('/')[-1][:30]}...")
                 analyse = analyser_technique_ia(texte_brut, url)
-
                 if analyse and "titre_poste" in analyse:
                     titre = normaliser_champ(analyse.get("titre_poste", "Poste Inconnu"))
                     entreprise = normaliser_champ(analyse.get("nom_entreprise", "Non précisé"))
                     cle = f"{titre} - {entreprise}"
-
                     analyse["match_logistique"] = "10/10 (Validé par filtre Python)"
 
                     score_1 = extraire_note(analyse.get("match_tech"))
@@ -693,7 +675,8 @@ with sync_playwright() as p:
                         offres_regroupees[cle]["liens"].append(url)
                     else:
                         offres_regroupees[cle] = {"donnees_ia": analyse, "liens": [url]}
-                        envoyer_discord(cle, url, analyse.get("match_tech", "N/A"))
+
+                    envoyer_discord(cle, url, analyse.get("match_tech", "N/A"))
 
     navigateur.close()
 
@@ -711,12 +694,13 @@ offres_triees = sorted(
 )
 
 with open(FICHIER_RAPPORT, "w", encoding="utf-8") as f_rapport:
-    f_rapport.write(f"# 🛡️ Veille DevSecOps consolidée - {datetime.now().strftime('%d/%m/%Y à %H:%M')}\n\n")
+    f_rapport.write(f"# 🛡️ Veille DevSecOps consolidée - {datetime.now().strftime('%d/%m/%Y à %H:%M')} (Groupe : {GROUPE_ID})\n\n")
 
     if not offres_triees:
         f_rapport.write("*Aucune nouvelle offre validée logistiquement aujourd'hui.*\n")
     else:
         f_rapport.write(f"*{len(offres_triees)} offre(s) — validées pour Nancy/Remote et triées par score technique.*\n\n")
+
         for titre_complet, contenu in offres_triees:
             ia = contenu["donnees_ia"]
             f_rapport.write(f"### {titre_complet}\n")
@@ -750,16 +734,14 @@ with open(FICHIER_RAPPORT, "w", encoding="utf-8") as f_rapport:
 # ==========================================
 print("📊 Mise à jour du tableau de bord Excel Master...")
 
-FICHIER_EXCEL = "suivi_candidatures.xlsx"
-donnees_excel = []
+FICHIER_EXCEL = f"suivi_candidatures_{GROUPE_ID}.xlsx" if GROUPE_ID != "default" else "suivi_candidatures.xlsx"
 
+donnees_excel = []
 for titre_complet, contenu in offres_triees:
     ia = contenu["donnees_ia"]
-
     # L'IA nous donne maintenant directement les bonnes colonnes
     poste = normaliser_champ(ia.get('titre_poste', titre_complet))
     entreprise = normaliser_champ(ia.get('nom_entreprise', 'Non précisé'))
-
     lien_principal = contenu["liens"][0] if contenu["liens"] else "Aucun lien"
 
     ligne = {
@@ -775,14 +757,13 @@ for titre_complet, contenu in offres_triees:
         "Accord entre modèles": ia.get('accord_modeles', ''),
         "Message LinkedIn (brouillon)": ia.get('message_linkedin', ''),
         "Lettre de Motivation (brouillon)": ia.get('lettre_motivation', ''),
-        "Statut": "",        
-        "Notes perso": ""    
+        "Statut": "",
+        "Notes perso": ""
     }
     donnees_excel.append(ligne)
 
 if donnees_excel:
     df_nouveau = pd.DataFrame(donnees_excel)
-
     if os.path.exists(FICHIER_EXCEL):
         try:
             df_ancien = pd.read_excel(FICHIER_EXCEL, engine='openpyxl')
