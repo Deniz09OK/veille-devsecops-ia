@@ -22,6 +22,10 @@ FICHIER_HISTORIQUE = "historique_offres.json"
 JOURS_MEMOIRE = 14
 MODELE_IA = "llama3.2"
 
+# Second modèle indépendant utilisé pour vérifier les offres à fort score
+# (voir SEUIL_CANDIDATURE plus bas). Doit être installé au préalable :
+#   ollama pull qwen2.5:7b
+# Tu peux remplacer par "mistral" si tu préfères un modèle plus léger.
 MODELE_IA_VALIDATION = "qwen2.5:7b"
 
 PROFIL_CANDIDAT = """
@@ -236,6 +240,22 @@ def extraire_note(champ: str) -> float:
     except:
         return 0.0
 
+def valider_match_tech(valeur) -> str:
+    """Filet de sécurité : un petit modèle local recopie parfois le
+    placeholder "N/10" du prompt au lieu de calculer une vraie note (le "N"
+    n'étant qu'un exemple de format). On vérifie que la partie avant le "/"
+    est bien un nombre ; si ce n'est pas le cas (ex: "N/10", "N/A"), on
+    retombe sur "5/10" par défaut plutôt que de laisser une valeur invalide
+    se propager jusqu'au rapport, à l'Excel ou à l'alerte Discord."""
+    texte = normaliser_champ(valeur)
+    partie_note = texte.split('/')[0].strip().replace(',', '.')
+    try:
+        float(partie_note)
+        return texte
+    except ValueError:
+        print(f"   ⚠️ Note IA invalide reçue ('{texte}') -> valeur par défaut appliquée (5/10)")
+        return "5/10"
+
 # ==========================================
 # FILTRE LOGISTIQUE PYTHON
 # ==========================================
@@ -407,12 +427,17 @@ def analyser_technique_ia(texte_offre: str, url_offre: str) -> dict | None:
         {contexte_memoire}
 
         Réponds UNIQUEMENT avec un objet JSON valide contenant ces clés exactes.
-        IMPORTANT : chaque valeur doit être une simple chaîne de caractères
-        (jamais un objet ni une liste imbriquée) :
+        IMPORTANT :
+        - Chaque valeur doit être une simple chaîne de caractères (jamais un objet
+          ni une liste imbriquée).
+        - "match_tech" doit être une VRAIE note numérique que TU calcules,
+          au format "X/10" où X est un chiffre ou un nombre décimal (exemples
+          valides : "7/10", "8.5/10", "3/10"). N'écris JAMAIS littéralement
+          "N/10" : le "N" n'est qu'un exemple de format, pas une valeur à copier.
         {{
             "titre_poste": "Intitulé du poste",
             "nom_entreprise": "Nom de l'entreprise (ou 'Non précisé')",
-            "match_tech": "N/10",
+            "match_tech": "7/10",
             "points_forts": "Outils du candidat explicitement mentionnés, sous forme de texte simple",
             "a_decouvrir": "Technologies demandées que le candidat ne maîtrise pas encore, sous forme de texte simple",
             "verdict": "Verdict technique final en une phrase"
@@ -422,8 +447,17 @@ def analyser_technique_ia(texte_offre: str, url_offre: str) -> dict | None:
         {texte_offre[:4000]}
         """
 
-        reponse = ollama.chat(model=MODELE_IA, messages=[{"role": "user", "content": prompt}], format="json")
+        # Température basse : on veut une note fiable et un format respecté,
+        # pas de créativité. Réduit fortement le risque que le modèle
+        # recopie le placeholder du prompt au lieu de calculer une vraie note.
+        reponse = ollama.chat(
+            model=MODELE_IA,
+            messages=[{"role": "user", "content": prompt}],
+            format="json",
+            options={"temperature": 0.2},
+        )
         analyse = json.loads(reponse["message"]["content"])
+        analyse["match_tech"] = valider_match_tech(analyse.get("match_tech"))
 
         collection_ia.upsert(
             ids=[url_offre], 
@@ -514,9 +548,13 @@ def verifier_avec_second_modele(texte_offre: str) -> dict:
         {PROFIL_CANDIDAT}
 
         Réponds UNIQUEMENT avec un objet JSON valide contenant ces clés exactes,
-        chaque valeur étant une simple chaîne de caractères :
+        chaque valeur étant une simple chaîne de caractères. "match_tech" doit
+        être une VRAIE note numérique que TU calcules, au format "X/10" où X
+        est un chiffre ou un nombre décimal (exemples valides : "7/10",
+        "8.5/10", "3/10"). N'écris JAMAIS littéralement "N/10" : le "N" n'est
+        qu'un exemple de format, pas une valeur à copier.
         {{
-            "match_tech": "N/10",
+            "match_tech": "6.5/10",
             "verdict": "Verdict technique final en une phrase"
         }}
 
@@ -524,11 +562,16 @@ def verifier_avec_second_modele(texte_offre: str) -> dict:
         {texte_offre[:4000]}
         """
 
-        reponse = ollama.chat(model=MODELE_IA_VALIDATION, messages=[{"role": "user", "content": prompt}], format="json")
+        reponse = ollama.chat(
+            model=MODELE_IA_VALIDATION,
+            messages=[{"role": "user", "content": prompt}],
+            format="json",
+            options={"temperature": 0.2},
+        )
         resultat = json.loads(reponse["message"]["content"])
 
         return {
-            "match_tech": normaliser_champ(resultat.get("match_tech", "0")),
+            "match_tech": valider_match_tech(resultat.get("match_tech", "0")),
             "verdict": normaliser_champ(resultat.get("verdict", "")),
         }
     except Exception as e:
