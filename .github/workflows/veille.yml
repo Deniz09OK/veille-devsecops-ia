@@ -2,14 +2,13 @@ name: Veille DevSecOps
 
 on:
   schedule:
-    - cron: '0 8 * * *'
+    - cron: '0 6 * * *'
   workflow_dispatch: {}
-
 
 jobs:
   veille:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 340
 
     steps:
       - name: Récupérer le dépôt
@@ -31,10 +30,6 @@ jobs:
       - name: Installer Ollama
         run: curl -fsSL https://ollama.com/install.sh | sh
 
-      # Sans ce cache, llama3.2 (~2 Go) + qwen2.5:7b (~4,7 Go) + nomic-embed-text
-      # seraient retéléchargés à chaque exécution : plusieurs minutes perdues
-      # et de la bande passante gaspillée pour rien. Cette partie ne change
-      # jamais de contenu -> une seule sauvegarde suffit (pas besoin de "save").
       - name: Mettre en cache les modèles Ollama
         uses: actions/cache@v4
         with:
