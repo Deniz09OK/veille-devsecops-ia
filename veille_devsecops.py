@@ -42,7 +42,7 @@ FICHIER_RAPPORT = os.path.join(chemin_archivage, "rapport_alternances.md")
 
 chemin_memoire_ia = f"./memoire_ia_{GROUPE_ID}" if GROUPE_ID != "default" else "./memoire_ia"
 client_chroma = chromadb.PersistentClient(path=chemin_memoire_ia)
-collection_ia = client_chroma.get_or_create_collection(name="memoire_devsecops")
+collection_ia = client_chroma.get_or_create_collection(name="memoire_devsecops_v2")
 
 MOTS_CLES_COMPLETS = [
     "SecOps", "Cloud Security Engineer", "Ingénieur SecOps", "Architecte Sécurité Cloud", "Consultant Sécurité Cloud",
