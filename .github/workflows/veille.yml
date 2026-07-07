@@ -1,24 +1,16 @@
 name: Veille DevSecOps
-
 on:
   schedule:
     - cron: '0 6 * * *'
   workflow_dispatch: {}
+concurrency:
+  group: veille-devsecops
+  cancel-in-progress: false
 
 jobs:
   veille:
     runs-on: ubuntu-latest
-    timeout-minutes: 300
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - groupe_id: secu
-            mots_cles: "SecOps,Cloud Security Engineer,Ingénieur SecOps,Architecte Sécurité Cloud,Consultant Sécurité Cloud"
-          - groupe_id: cloud-devops
-            mots_cles: "DevSecOps,DevOps,Cloud Builder,Ingénieur Cloud,Ingénieur DevOps"
-          - groupe_id: infra-sre
-            mots_cles: "Site Reliability Engineer (SRE),Ingénieur Système et Réseau,Ingénieur de Production IT et Release Engineer"
+    timeout-minutes: 340
 
     steps:
       - name: Récupérer le dépôt
@@ -39,24 +31,22 @@ jobs:
 
       - name: Installer Ollama
         run: curl -fsSL https://ollama.com/install.sh | sh
-
       - name: Mettre en cache les modèles Ollama
         uses: actions/cache@v4
         with:
           path: ~/.ollama/models
           key: ollama-models-llama3.2-qwen2.5-7b-nomic-embed-text
-
-      - name: Restaurer l'état de la veille (mémoire IA, historique, Excel, rapports) - ${{ matrix.groupe_id }}
+      - name: Restaurer l'état de la veille (mémoire IA, historique, Excel, rapports)
         uses: actions/cache/restore@v4
         with:
           path: |
-            memoire_ia_${{ matrix.groupe_id }}
-            historique_offres_${{ matrix.groupe_id }}.json
-            suivi_candidatures_${{ matrix.groupe_id }}.xlsx
+            memoire_ia
+            historique_offres.json
+            suivi_candidatures.xlsx
             Historique
-          key: etat-veille-${{ matrix.groupe_id }}-${{ github.run_id }}
+          key: etat-veille-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            etat-veille-${{ matrix.groupe_id }}-
+            etat-veille-
 
       - name: Démarrer Ollama et télécharger les modèles
         run: |
@@ -66,78 +56,29 @@ jobs:
           ollama pull qwen2.5:7b
           ollama pull nomic-embed-text
 
-      - name: Lancer le script de veille - Groupe ${{ matrix.groupe_id }}
+      - name: Lancer le script de veille
         env:
           FT_CLIENT_ID: ${{ secrets.FT_CLIENT_ID }}
           FT_CLIENT_SECRET: ${{ secrets.FT_CLIENT_SECRET }}
           WEBHOOK_DISCORD: ${{ secrets.WEBHOOK_DISCORD }}
-          GROUPE_ID: ${{ matrix.groupe_id }}
-          MOTS_CLES_GROUPE: ${{ matrix.mots_cles }}
         run: python veille_devsecops.py
 
-      - name: Sauvegarder l'état de la veille pour le prochain run - ${{ matrix.groupe_id }}
+      - name: Sauvegarder l'état de la veille pour le prochain run
         if: always()
         uses: actions/cache/save@v4
         with:
           path: |
-            memoire_ia_${{ matrix.groupe_id }}
-            historique_offres_${{ matrix.groupe_id }}.json
-            suivi_candidatures_${{ matrix.groupe_id }}.xlsx
+            memoire_ia
+            historique_offres.json
+            suivi_candidatures.xlsx
             Historique
-          key: etat-veille-${{ matrix.groupe_id }}-${{ github.run_id }}
-
-      - name: Publier les résultats du groupe ${{ matrix.groupe_id }} en téléchargement
+          key: etat-veille-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Publier les résultats du jour en téléchargement
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: veille-devsecops-${{ matrix.groupe_id }}-${{ github.run_id }}
+          name: veille-devsecops-resultats-${{ github.run_id }}
           path: |
-            suivi_candidatures_${{ matrix.groupe_id }}.xlsx
+            suivi_candidatures.xlsx
             Historique
-          retention-days: 30
-
-  fusionner:
-    needs: veille
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Télécharger tous les résultats des groupes
-        uses: actions/download-artifact@v4
-        with:
-          pattern: veille-devsecops-*-${{ github.run_id }}
-          path: resultats-bruts
-          merge-multiple: false
-
-      - name: Installer les dépendances de fusion
-        run: pip install pandas openpyxl
-
-      - name: Fusionner les fichiers Excel des 3 groupes en un seul Master
-        run: |
-          python - <<'EOF'
-          import glob
-          import pandas as pd
-
-          fichiers = glob.glob("resultats-bruts/**/suivi_candidatures_*.xlsx", recursive=True)
-          print(f"Fichiers trouvés : {fichiers}")
-
-          if fichiers:
-              dfs = [pd.read_excel(f, engine="openpyxl") for f in fichiers]
-              df_final = pd.concat(dfs, ignore_index=True)
-              if "Lien de l'offre" in df_final.columns:
-                  df_final = df_final.drop_duplicates(subset=["Lien de l'offre"])
-              df_final.to_excel("suivi_candidatures_MASTER.xlsx", index=False, engine="openpyxl")
-              print(f"✅ Fusion terminée : {len(df_final)} offre(s) au total.")
-          else:
-              print("⚠️ Aucun fichier Excel à fusionner.")
-          EOF
-
-      - name: Publier le tableau de bord Excel fusionné
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: veille-devsecops-MASTER-${{ github.run_id }}
-          path: |
-            suivi_candidatures_MASTER.xlsx
-            resultats-bruts
           retention-days: 30
