@@ -4,6 +4,7 @@ import requests
 import chromadb
 import pandas as pd
 import urllib.parse
+import time
 from datetime import datetime, timedelta
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 from dotenv import load_dotenv
@@ -177,20 +178,23 @@ def lire_texte_offre(contexte, url):
     finally: page_offre.close()
 
 # ==========================================
-# ANALYSE IA (GROQ API + RAG)
+# ANALYSE IA (GROQ API + RAG - VERSION CORRIGÉE)
 # ==========================================
 def analyser_technique_ia(texte_offre, url_offre):
     print("   🧠 Vectorisation et analyse via Groq Cloud...")
-    try:
-        # ChromaDB gère les embeddings automatiquement maintenant
-        resultats = collection_ia.query(query_texts=[texte_offre[:3000]], n_results=1)
-        contexte_memoire = ""
-        if resultats['distances'] and len(resultats['distances'][0]) > 0:
-            if resultats['distances'][0][0] < 1.0: # Seuil Chroma natif
+    max_retries = 3 
+    
+    for attempt in range(max_retries):
+        try:
+            # 1. Vectorisation avec Chroma
+            resultats = collection_ia.query(query_texts=[texte_offre[:3000]], n_results=1)
+            contexte_memoire = ""
+            if resultats['distances'] and len(resultats['distances'][0]) > 0 and resultats['distances'][0][0] < 1.0:
                 vieux_score = resultats['metadatas'][0][0].get('score', 'Inconnu')
-                contexte_memoire = f"\nRAPPEL: Tu as déjà évalué une offre similaire à {vieux_score}/10. Reste cohérent dans ton barème.\n"
+                contexte_memoire = f"\nRAPPEL: Tu as déjà évalué une offre similaire à {vieux_score}/10. Reste cohérent dans ton barème."
 
-        prompt = f"""
+            # 2. Définition du prompt
+            prompt = f"""
 Analyse cette offre d'alternance pour un étudiant en MSc Cybersécurité & Cloud (Epitech Nancy).
 Profil : {PROFIL_CANDIDAT}
 {contexte_memoire}
@@ -209,25 +213,37 @@ ATTENTION POUR "match_tech" : Donne uniquement un chiffre suivi de "/10" (exempl
 
 Texte de l'offre : {texte_offre[:4000]}
 """
-        reponse = client_ia.chat.completions.create(
-            model=MODELE_IA,
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
-            temperature=0.2
-        )
-        
-        analyse = json.loads(reponse.choices[0].message.content)
-        analyse["match_tech"] = valider_match_tech(analyse.get("match_tech", "5/10"))
+            # 3. Appel API Groq
+            reponse = client_ia.chat.completions.create(
+                model=MODELE_IA,
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+                temperature=0.2
+            )
+            
+            analyse = json.loads(reponse.choices[0].message.content)
+            analyse["match_tech"] = valider_match_tech(analyse.get("match_tech", "5/10"))
 
-        collection_ia.upsert(
-            ids=[url_offre],
-            documents=[texte_offre[:3000]],
-            metadatas=[{"score": analyse["match_tech"]}]
-        )
-        return analyse
-    except Exception as e:
-        print(f"   ⚠️ Erreur Groq IA : {e}")
-        return None
+            # 4. Upsert Chroma
+            collection_ia.upsert(
+                ids=[url_offre],
+                documents=[texte_offre[:3000]],
+                metadatas=[{"score": analyse["match_tech"]}]
+            )
+            return analyse
+
+        except Exception as e:
+            # Gestion intelligente du Rate Limit (429)
+            if "429" in str(e):
+                wait_time = 20
+                print(f"   ⚠️ Rate limit atteint, pause de {wait_time}s (tentative {attempt+1}/{max_retries})...")
+                time.sleep(wait_time)
+                continue 
+            else:
+                print(f"   ⚠️ Erreur Groq IA : {e}")
+                return None 
+                
+    return None
 
 SEUIL_CANDIDATURE = 8.0
 
