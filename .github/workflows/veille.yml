@@ -46,7 +46,7 @@ jobs:
             historique_offres_${{ matrix.groupe_id }}.json
             suivi_candidatures_${{ matrix.groupe_id }}.xlsx
             Historique
-          key: etat-veille-${{ matrix.groupe_id }}-${{ github.run_id }}
+          key: v2-etat-veille-${{ matrix.groupe_id }}-${{ github.run_id }}
           restore-keys: |
             etat-veille-${{ matrix.groupe_id }}-
 
@@ -57,7 +57,7 @@ jobs:
           WEBHOOK_DISCORD: ${{ secrets.WEBHOOK_DISCORD }}
           GROUPE_ID: ${{ matrix.groupe_id }}
           MOTS_CLES_GROUPE: ${{ matrix.mots_cles }}
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }} # 🔑 Ta clé Groq sécurisée
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }} 
         run: python veille_devsecops.py
 
       - name: Sauvegarder l'état de la veille pour le prochain run
@@ -69,7 +69,7 @@ jobs:
             historique_offres_${{ matrix.groupe_id }}.json
             suivi_candidatures_${{ matrix.groupe_id }}.xlsx
             Historique
-          key: etat-veille-${{ matrix.groupe_id }}-${{ github.run_id }}
+          key: v2-etat-veille-${{ matrix.groupe_id }}-${{ github.run_id }}
 
       - name: Publier les résultats
         if: always()
