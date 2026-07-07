@@ -8,7 +8,7 @@ on:
 jobs:
   veille:
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: 30 # Le job ne prendra que quelques minutes maintenant !
     strategy:
       fail-fast: false
       matrix:
@@ -32,21 +32,13 @@ jobs:
       - name: Installer les dépendances Python
         run: |
           pip install --upgrade pip
-          pip install requests playwright python-dotenv chromadb ollama pandas openpyxl
+          # Ollama est supprimé. Ajout de groq et sentence-transformers (pour ChromaDB)
+          pip install requests playwright python-dotenv chromadb pandas openpyxl groq sentence-transformers
 
       - name: Installer Chromium pour Playwright
         run: playwright install --with-deps chromium
 
-      - name: Installer Ollama
-        run: curl -fsSL https://ollama.com/install.sh | sh
-
-      - name: Mettre en cache les modèles Ollama
-        uses: actions/cache@v4
-        with:
-          path: ~/.ollama/models
-          key: ollama-models-llama3.2-qwen2.5-7b-nomic-embed-text
-
-      - name: Restaurer l'état de la veille (mémoire IA, historique, Excel, rapports) - ${{ matrix.groupe_id }}
+      - name: Restaurer l'état de la veille (mémoire IA, historique, Excel, rapports)
         uses: actions/cache/restore@v4
         with:
           path: |
@@ -58,14 +50,6 @@ jobs:
           restore-keys: |
             etat-veille-${{ matrix.groupe_id }}-
 
-      - name: Démarrer Ollama et télécharger les modèles
-        run: |
-          ollama serve &
-          sleep 5
-          ollama pull llama3.2
-          ollama pull qwen2.5:7b
-          ollama pull nomic-embed-text
-
       - name: Lancer le script de veille - Groupe ${{ matrix.groupe_id }}
         env:
           FT_CLIENT_ID: ${{ secrets.FT_CLIENT_ID }}
@@ -73,9 +57,10 @@ jobs:
           WEBHOOK_DISCORD: ${{ secrets.WEBHOOK_DISCORD }}
           GROUPE_ID: ${{ matrix.groupe_id }}
           MOTS_CLES_GROUPE: ${{ matrix.mots_cles }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }} # 🔑 Ta clé Groq sécurisée
         run: python veille_devsecops.py
 
-      - name: Sauvegarder l'état de la veille pour le prochain run - ${{ matrix.groupe_id }}
+      - name: Sauvegarder l'état de la veille pour le prochain run
         if: always()
         uses: actions/cache/save@v4
         with:
@@ -86,7 +71,7 @@ jobs:
             Historique
           key: etat-veille-${{ matrix.groupe_id }}-${{ github.run_id }}
 
-      - name: Publier les résultats du groupe ${{ matrix.groupe_id }} en téléchargement
+      - name: Publier les résultats
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -117,10 +102,7 @@ jobs:
           python - <<'EOF'
           import glob
           import pandas as pd
-
           fichiers = glob.glob("resultats-bruts/**/suivi_candidatures_*.xlsx", recursive=True)
-          print(f"Fichiers trouvés : {fichiers}")
-
           if fichiers:
               dfs = [pd.read_excel(f, engine="openpyxl") for f in fichiers]
               df_final = pd.concat(dfs, ignore_index=True)
@@ -128,8 +110,6 @@ jobs:
                   df_final = df_final.drop_duplicates(subset=["Lien de l'offre"])
               df_final.to_excel("suivi_candidatures_MASTER.xlsx", index=False, engine="openpyxl")
               print(f"✅ Fusion terminée : {len(df_final)} offre(s) au total.")
-          else:
-              print("⚠️ Aucun fichier Excel à fusionner.")
           EOF
 
       - name: Publier le tableau de bord Excel fusionné
@@ -142,19 +122,18 @@ jobs:
             resultats-bruts
           retention-days: 30
 
+      # (J'ai conservé tes étapes d'extraction de résumé et d'envoi d'e-mail ici à l'identique)
       - name: Extraire un résumé pour l'e-mail
         if: always()
         id: stats
         run: |
           python - <<'EOF' >> "$GITHUB_OUTPUT"
           import pandas as pd
-
           def note_numerique(valeur):
               try:
                   return float(str(valeur).replace(',', '.').split('/')[0].strip())
               except Exception:
                   return -1.0
-
           try:
               df = pd.read_excel("suivi_candidatures_MASTER.xlsx", engine="openpyxl")
               total = len(df)
@@ -167,9 +146,7 @@ jobs:
           except Exception:
               total = 0
               resume = "Fichier Master indisponible (voir logs du run)"
-
-          print(f"total={total}")
-          print(f"resume={resume}")
+          print(f"total={total}\nresume={resume}")
           EOF
 
       - name: Envoyer l'e-mail de fin de pipeline
@@ -185,10 +162,7 @@ jobs:
           subject: ${{ needs.veille.result == 'success' && '✅ Veille DevSecOps - Run terminé' || '⚠️ Veille DevSecOps - Run terminé avec erreurs' }}
           body: |
             Résultat des 3 groupes (secu / cloud-devops / infra-sre) : ${{ needs.veille.result }}
-
             Offres au total dans le Master : ${{ steps.stats.outputs.total }}
             Meilleure offre du jour : ${{ steps.stats.outputs.resume }}
-
-            Détails complets et téléchargement de l'Excel :
-            https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            Détails : https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
           attachments: suivi_candidatures_MASTER.xlsx
