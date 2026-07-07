@@ -142,7 +142,7 @@ jobs:
             resultats-bruts
           retention-days: 30
 
-          - name: Extraire un résumé pour l'e-mail
+      - name: Extraire un résumé pour l'e-mail
         if: always()
         id: stats
         run: |

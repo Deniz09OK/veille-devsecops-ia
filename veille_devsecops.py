@@ -297,12 +297,35 @@ def filtre_logistique(texte_brut) -> bool:
     if any(ecole in texte for ecole in ecoles_interdites):
         return False
 
-    mots_valides = ["nancy", "télétravail", "remote", "full-remote", "télétravail total", "54000", "meurthe-et-moselle"]
-    mots_interdits = ["paris", "boulogne", "lyon", "toulouse", "bordeaux", "nantes", "lille"]
+    villes_interdites = ["paris", "boulogne", "lyon", "toulouse", "bordeaux", "nantes", "lille"]
+    ville_interdite_trouvee = any(ville in texte for ville in villes_interdites)
 
-    if any(ville in texte for ville in mots_interdits) and not any(remote in texte for remote in ["remote", "télétravail total", "100% télétravail"]):
-        return False
+    # Signaux de télétravail PARTIEL : s'ils apparaissent avec une ville
+    # interdite, on rejette d'office, même si le mot "remote" traîne ailleurs
+    # sur la page (texte marketing générique, autre offre affichée à côté...).
+    signaux_partiel = [
+        "télétravail partiel", "teletravail partiel", "hybride",
+        "jours de télétravail", "jour de télétravail",
+        "jours de teletravail", "jour de teletravail",
+    ]
 
+    # Signaux de télétravail INTÉGRAL explicites. Liste resserrée : on retire
+    # le mot "remote" seul (trop générique, présent dans du texte sans rapport
+    # avec le mode de travail réel de CE poste précis).
+    signaux_full_remote = [
+        "télétravail total", "teletravail total", "100% télétravail",
+        "100% teletravail", "full remote", "full-remote",
+        "télétravail intégral", "teletravail integral",
+    ]
+
+    if ville_interdite_trouvee:
+        if any(s in texte for s in signaux_partiel):
+            return False
+        if not any(s in texte for s in signaux_full_remote):
+            return False
+        return True  # ville interdite mais télétravail intégral confirmé
+
+    mots_valides = ["nancy", "télétravail", "remote", "54000", "meurthe-et-moselle"]
     return any(mot in texte for mot in mots_valides)
 
 
