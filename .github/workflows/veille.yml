@@ -85,7 +85,7 @@ jobs:
     needs: veille
     if: always()
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 60
     steps:
       - name: Télécharger tous les résultats des groupes
         uses: actions/download-artifact@v4
