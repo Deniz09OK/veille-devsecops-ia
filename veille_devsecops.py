@@ -268,6 +268,23 @@ def extraire_note(champ: str) -> float:
         return 0.0
 
 
+def valider_match_tech(valeur) -> str:
+    """Filet de sécurité : un petit modèle local recopie parfois le
+    placeholder "N/10" du prompt (ou un vieux verdict de la mémoire RAG) au
+    lieu de calculer une vraie note. On vérifie que la partie avant le "/"
+    est bien un nombre ; si ce n'est pas le cas (ex: "N/10", "N/A"), on
+    retombe sur "5/10" par défaut plutôt que de laisser une valeur invalide
+    se propager jusqu'au rapport, à l'Excel ou à l'alerte Discord."""
+    texte = normaliser_champ(valeur)
+    partie_note = texte.split('/')[0].strip().replace(',', '.')
+    try:
+        float(partie_note)
+        return texte
+    except ValueError:
+        print(f"   ⚠️ Note IA invalide reçue ('{texte}') -> valeur par défaut appliquée (5/10)")
+        return "5/10"
+
+
 # ==========================================
 # FILTRE LOGISTIQUE PYTHON
 # ==========================================
@@ -409,16 +426,23 @@ def analyser_technique_ia(texte_offre: str, url_offre: str) -> dict | None:
         contexte_memoire = ""
         if resultats['distances'] and len(resultats['distances'][0]) > 0:
             distance = resultats['distances'][0][0]
-            if distance < 350:
+            # Seuil resserré (350 -> 100) : à 350, des offres SANS RAPPORT
+            # (ex: un poste commercial et un poste d'ingénieur systèmes)
+            # étaient jugées "similaires", et le modèle se contentait de
+            # recopier le vieux verdict au lieu de réanalyser l'offre.
+            if distance < 100:
                 vieux_score = resultats['metadatas'][0][0].get('score', 'Inconnu')
                 vieux_verdict = resultats['metadatas'][0][0].get('verdict', 'Inconnu')
                 print(f"   💡 Souvenir trouvé ! (Distance: {distance:.0f}). Injection dans la réflexion de l'IA...")
                 contexte_memoire = f"""
---- MÉMOIRE D'UNE OFFRE SIMILAIRE DU PASSÉ ---
-Pour t'aider à être cohérent, sache que tu as déjà évalué une offre techniquement très similaire par le passé.
-- La note que tu avais donnée : {vieux_score}
-- Le verdict que tu avais rendu : "{vieux_verdict}"
-Sers-toi de ce contexte pour évaluer cette NOUVELLE offre avec la même rigueur.
+--- MÉMOIRE D'UNE OFFRE SIMILAIRE DU PASSÉ (référence de calibration UNIQUEMENT) ---
+Tu as déjà évalué une offre techniquement proche par le passé :
+- Note donnée à l'époque : {vieux_score}
+- Verdict rendu à l'époque : "{vieux_verdict}"
+Utilise ceci UNIQUEMENT pour rester cohérent dans ton barème. Tu DOIS quand
+même analyser l'offre ci-dessous depuis zéro et produire une note et un
+verdict qui lui sont propres — ne recopie JAMAIS le verdict ou la note
+ci-dessus tels quels, même si l'offre semble ressemblante.
 ----------------------------------------------
 """
 
@@ -434,12 +458,18 @@ Profil du candidat :
 {contexte_memoire}
 
 Réponds UNIQUEMENT avec un objet JSON valide contenant ces clés exactes.
-IMPORTANT : chaque valeur doit être une simple chaîne de caractères
-(jamais un objet ni une liste imbriquée) :
+IMPORTANT :
+- Chaque valeur doit être une simple chaîne de caractères (jamais un objet
+  ni une liste imbriquée).
+- "match_tech" doit être une VRAIE note numérique que TU calcules pour
+  CETTE offre précise, au format "X/10" où X est un chiffre ou un nombre
+  décimal (exemples valides : "7/10", "8.5/10", "3/10"). N'écris JAMAIS
+  littéralement "N/10" : le "N" n'est qu'un exemple de format, pas une
+  valeur à copier.
 {{
   "titre_poste": "Intitulé du poste",
   "nom_entreprise": "Nom de l'entreprise (ou 'Non précisé')",
-  "match_tech": "N/10",
+  "match_tech": "7/10",
   "points_forts": "Outils du candidat explicitement mentionnés, sous forme de texte simple",
   "a_decouvrir": "Technologies demandées que le candidat ne maîtrise pas encore, sous forme de texte simple",
   "verdict": "Verdict technique final en une phrase"
@@ -448,8 +478,17 @@ IMPORTANT : chaque valeur doit être une simple chaîne de caractères
 Texte de l'offre :
 {texte_offre[:4000]}
 """
-        reponse = ollama.chat(model=MODELE_IA, messages=[{"role": "user", "content": prompt}], format="json")
+        # Température basse : on veut une note fiable et un format respecté,
+        # pas de créativité. Réduit fortement le risque que le modèle
+        # recopie le placeholder ou un verdict de la mémoire RAG tel quel.
+        reponse = ollama.chat(
+            model=MODELE_IA,
+            messages=[{"role": "user", "content": prompt}],
+            format="json",
+            options={"temperature": 0.2},
+        )
         analyse = json.loads(reponse["message"]["content"])
+        analyse["match_tech"] = valider_match_tech(analyse.get("match_tech"))
 
         collection_ia.upsert(
             ids=[url_offre],
@@ -542,19 +581,27 @@ Profil du candidat :
 {PROFIL_CANDIDAT}
 
 Réponds UNIQUEMENT avec un objet JSON valide contenant ces clés exactes,
-chaque valeur étant une simple chaîne de caractères :
+chaque valeur étant une simple chaîne de caractères. "match_tech" doit être
+une VRAIE note numérique que TU calcules, au format "X/10" où X est un
+chiffre ou un nombre décimal (exemples valides : "7/10", "8.5/10", "3/10").
+N'écris JAMAIS littéralement "N/10" : le "N" n'est qu'un exemple de format.
 {{
-  "match_tech": "N/10",
+  "match_tech": "6.5/10",
   "verdict": "Verdict technique final en une phrase"
 }}
 
 Texte de l'offre :
 {texte_offre[:4000]}
 """
-        reponse = ollama.chat(model=MODELE_IA_VALIDATION, messages=[{"role": "user", "content": prompt}], format="json")
+        reponse = ollama.chat(
+            model=MODELE_IA_VALIDATION,
+            messages=[{"role": "user", "content": prompt}],
+            format="json",
+            options={"temperature": 0.2},
+        )
         resultat = json.loads(reponse["message"]["content"])
         return {
-            "match_tech": normaliser_champ(resultat.get("match_tech", "0")),
+            "match_tech": valider_match_tech(resultat.get("match_tech", "0")),
             "verdict": normaliser_champ(resultat.get("verdict", "")),
         }
     except Exception as e:
