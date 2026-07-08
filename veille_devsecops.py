@@ -27,8 +27,8 @@ FICHIER_HISTORIQUE = f"historique_offres_{GROUPE_ID}.json" if GROUPE_ID != "defa
 JOURS_MEMOIRE = 14
 MAX_ANALYSES_PAR_RUN = 15  # 🛑 Quota de sécurité pour ne pas saturer l'API Groq
 
-MODELE_IA = "llama-3.1-8b-instant"
-MODELE_IA_VALIDATION = "mixtral-8x7b-32768"
+MODELE_IA = "openai/gpt-oss-20b"
+MODELE_IA_VALIDATION = "openai/gpt-oss-120b"
 SEUIL_CANDIDATURE = 8.0
 
 PROFIL_CANDIDAT = """
