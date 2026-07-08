@@ -225,9 +225,35 @@ def filtre_logistique(texte_brut):
     texte = texte_brut.lower()
     if any(e in texte for e in ["iscod", "iscode", "cesi", "openclassrooms", "sup de vinci", "my digital school", "epsi"]):
         return False
-    if any(v in texte for v in ["paris", "boulogne", "lyon", "toulouse", "bordeaux", "nantes", "lille"]):
-        return any(s in texte for s in ["télétravail total", "teletravail total", "100% télétravail", "100% teletravail", "full remote", "full-remote"]) and not any(s in texte for s in ["télétravail partiel", "hybride", "jours de télétravail"])
-    return any(mot in texte for mot in ["nancy", "télétravail", "remote", "54000", "meurthe-et-moselle"])
+
+    # Signal fort et sans ambiguïté : Nancy explicitement mentionné.
+    if any(mot in texte for mot in ["nancy", "54000", "meurthe-et-moselle"]):
+        return True
+
+    # Pour toute autre ville (listée comme interdite OU pas), on exige un
+    # signal EXPLICITE de télétravail intégral. On ne se contente plus du mot
+    # générique "télétravail"/"remote" tout court : ce mot peut apparaître
+    # n'importe où sur la page scrapée (navigation, liens "recherches
+    # similaires", filtres du site) sans aucun rapport avec CETTE offre.
+    signaux_partiel = ["télétravail partiel", "teletravail partiel", "hybride", "jours de télétravail", "jour de télétravail"]
+    signaux_full_remote = ["télétravail total", "teletravail total", "100% télétravail", "100% teletravail", "full remote", "full-remote", "télétravail intégral", "teletravail integral"]
+
+    if any(s in texte for s in signaux_partiel):
+        return False
+    return any(s in texte for s in signaux_full_remote)
+
+
+def filtre_type_contrat(texte_brut):
+    """Exige la présence explicite d'un terme d'alternance/apprentissage.
+    Filtre POSITIF plutôt que négatif (rejeter sur détection de "CDI"/"CDD")
+    car une offre d'alternance légitime mentionne souvent une possibilité de
+    CDI à l'issue du contrat — chercher à exclure "CDI" rejetterait ces
+    offres à tort."""
+    if not texte_brut:
+        return False
+    texte = texte_brut.lower()
+    mots_alternance = ["alternance", "alternant", "apprentissage", "contrat de professionnalisation", "contrat d'apprentissage"]
+    return any(mot in texte for mot in mots_alternance)
 
 
 # ==========================================
@@ -320,6 +346,14 @@ def lire_texte_offre(contexte, url):
 # ANALYSE IA (Groq, avec mémoire RAG ChromaDB)
 # ==========================================
 def analyser_technique_ia(texte_offre, url_offre):
+    """Analyse collaborative à deux modèles :
+    1. llama-3.1-8b-instant produit une première analyse (rapide, bon rapport qualité/vitesse).
+    2. mixtral-8x7b-32768 relit cette analyse de façon critique, corrige les erreurs
+       (score mal calibré, entreprise mal identifiée, compétence oubliée) et produit
+       la version FINALE. Ce n'est pas une simple double-vérification après coup :
+       le second modèle voit le travail du premier et l'améliore directement.
+    Le score initial de llama est conservé à part (traçabilité), mais c'est la
+    version de mixtral qui fait foi partout ailleurs (Excel, Discord, seuils)."""
     max_retries = 3
     for attempt in range(max_retries):
         try:
@@ -329,23 +363,49 @@ def analyser_technique_ia(texte_offre, url_offre):
                 vieux_score = resultats['metadatas'][0][0].get('score', 'Inconnu')
                 contexte_memoire = f"\nRAPPEL: Tu as déjà évalué une offre similaire à {vieux_score}. Reste cohérent mais réanalyse CETTE offre depuis zéro."
 
-            prompt = (
+            # --- ÉTAPE 1 : première analyse (llama-3.1-8b-instant) ---
+            prompt_initial = (
                 f"Analyse cette offre pour un MSc Cybersécurité & Cloud (Epitech). "
                 f"Profil: {PROFIL_CANDIDAT}. {contexte_memoire}. "
                 f"Réponds en JSON strict avec 'titre_poste', 'nom_entreprise', "
                 f"'match_tech' (une VRAIE note que tu calcules, ex: \"8/10\", jamais la lettre N), "
                 f"'points_forts', 'a_decouvrir', 'verdict'. Texte: {texte_offre[:4000]}"
             )
-
-            reponse = client_ia.chat.completions.create(
-                model=MODELE_IA, messages=[{"role": "user", "content": prompt}],
+            reponse_1 = client_ia.chat.completions.create(
+                model=MODELE_IA, messages=[{"role": "user", "content": prompt_initial}],
                 response_format={"type": "json_object"}, temperature=0.2
             )
-            analyse = json.loads(reponse.choices[0].message.content)
-            analyse["match_tech"] = valider_match_tech(analyse.get("match_tech", "5/10"))
+            analyse_initiale = json.loads(reponse_1.choices[0].message.content)
+            analyse_initiale["match_tech"] = valider_match_tech(analyse_initiale.get("match_tech", "5/10"))
+            score_initial = analyse_initiale["match_tech"]
 
-            collection_ia.upsert(ids=[url_offre], documents=[texte_offre[:3000]], metadatas=[{"score": analyse["match_tech"]}])
-            return analyse
+            # --- ÉTAPE 2 : relecture critique et version finale (mixtral-8x7b-32768) ---
+            prompt_relecture = (
+                f"Tu es un second expert qui relit l'analyse d'un collègue pour l'améliorer "
+                f"avant validation finale. Profil du candidat: {PROFIL_CANDIDAT}.\n\n"
+                f"Analyse initiale du collègue à relire :\n{json.dumps(analyse_initiale, ensure_ascii=False)}\n\n"
+                f"Texte de l'offre :\n{texte_offre[:4000]}\n\n"
+                f"Relis cette analyse de façon critique : corrige toute erreur (score mal "
+                f"calibré, entreprise mal identifiée, compétence oubliée ou mal évaluée), "
+                f"complète ce qui manque. Ne recopie PAS l'analyse initiale si tu vois une "
+                f"erreur ou une imprécision — corrige-la. Réponds en JSON strict avec les "
+                f"mêmes clés ('titre_poste', 'nom_entreprise', 'match_tech', 'points_forts', "
+                f"'a_decouvrir', 'verdict') pour ta version finale. 'match_tech' doit être "
+                f"une VRAIE note, format \"X/10\", jamais la lettre N."
+            )
+            reponse_2 = client_ia.chat.completions.create(
+                model=MODELE_IA_VALIDATION, messages=[{"role": "user", "content": prompt_relecture}],
+                response_format={"type": "json_object"}, temperature=0.2
+            )
+            analyse_finale = json.loads(reponse_2.choices[0].message.content)
+            analyse_finale["match_tech"] = valider_match_tech(analyse_finale.get("match_tech", score_initial))
+
+            # Traçabilité : on garde le score initial et un résumé de l'ajustement
+            analyse_finale["score_initial"] = score_initial
+            analyse_finale["ajustement_collaboratif"] = comparer_scores(score_initial, analyse_finale["match_tech"])
+
+            collection_ia.upsert(ids=[url_offre], documents=[texte_offre[:3000]], metadatas=[{"score": analyse_finale["match_tech"]}])
+            return analyse_finale
 
         except Exception as e:
             if "429" in str(e):
@@ -365,30 +425,17 @@ def generer_candidature_ia(analyse, texte_offre):
         return {"message_linkedin": "", "lettre_motivation": ""}
 
 
-def verifier_avec_second_modele(texte_offre):
-    try:
-        reponse = client_ia.chat.completions.create(
-            model=MODELE_IA_VALIDATION,
-            messages=[{"role": "user", "content": "JSON strict: 'match_tech' (une VRAIE note, ex: '7/10', jamais la lettre N), 'verdict'. Texte: " + texte_offre[:4000]}],
-            response_format={"type": "json_object"}, temperature=0.2
-        )
-        resultat = json.loads(reponse.choices[0].message.content)
-        return {"match_tech": valider_match_tech(resultat.get("match_tech", "5/10")), "verdict": normaliser_champ(resultat.get("verdict", ""))}
-    except Exception:
-        return {"match_tech": "5/10", "verdict": ""}
-
-
-def comparer_avis_modeles(score_1, score_2):
-    if score_2 is None:
-        return "N/A (second modèle indisponible)"
-    score_2 = extraire_note(score_2)
-    ecart = abs(score_1 - score_2)
-    if ecart <= 1:
-        return f"✅ Accord (écart {ecart:.1f} pt)"
-    elif ecart <= 2.5:
-        return f"🟡 Léger écart ({ecart:.1f} pts)"
-    else:
-        return f"⚠️ Désaccord fort ({ecart:.1f} pts) — à vérifier manuellement"
+def comparer_scores(score_initial, score_final):
+    """Résume l'écart entre la première analyse (llama) et la version finale
+    corrigée par mixtral — utile pour voir si la collaboration a changé quelque
+    chose d'important, ou si les deux modèles étaient déjà d'accord."""
+    note_1 = extraire_note(score_initial)
+    note_2 = extraire_note(score_final)
+    ecart = note_2 - note_1
+    if abs(ecart) < 0.5:
+        return f"✅ Confirmé ({score_initial} → {score_final})"
+    signe = "+" if ecart > 0 else ""
+    return f"🔧 Ajusté ({score_initial} → {score_final}, {signe}{ecart:.1f} pt)"
 
 
 # ==========================================
@@ -411,7 +458,7 @@ for offre in recuperer_offres_france_travail(generer_recherches_ft(MOTS_CLES)):
         texte = offre.get("description", "")
 
         code_postal = str(offre.get("lieuTravail", {}).get("codePostal", ""))
-        if filtre_logistique(texte) or code_postal.startswith("54"):
+        if (filtre_logistique(texte) or code_postal.startswith("54")) and filtre_type_contrat(texte):
             time.sleep(2)  # Respect du rate-limit Groq
             analyse = analyser_technique_ia(texte, url)
 
@@ -434,10 +481,6 @@ for offre in recuperer_offres_france_travail(generer_recherches_ft(MOTS_CLES)):
                 score_1 = extraire_note(analyse.get("match_tech"))
                 if score_1 >= SEUIL_CANDIDATURE:
                     analyse.update(generer_candidature_ia(analyse, texte))
-                    avis_2 = verifier_avec_second_modele(texte)
-                    analyse["score_modele_2"] = avis_2.get("match_tech", "N/A")
-                    analyse["verdict_modele_2"] = avis_2.get("verdict", "")
-                    analyse["accord_modeles"] = comparer_avis_modeles(score_1, avis_2.get("match_tech"))
 
                 if cle in offres_regroupees:
                     offres_regroupees[cle]["liens"].append(url)
@@ -469,7 +512,7 @@ with sync_playwright() as p:
             texte_brut = lire_texte_offre(contexte, url_brute)
             historique[url] = datetime.now().isoformat()
 
-            if texte_brut and filtre_logistique(texte_brut):
+            if texte_brut and filtre_logistique(texte_brut) and filtre_type_contrat(texte_brut):
                 print(f"🧠 Analyse IA (Scraping) : {url.split('/')[-1][:30]}...")
                 time.sleep(2)  # Respect du rate-limit Groq
                 analyse = analyser_technique_ia(texte_brut, url)
@@ -484,10 +527,6 @@ with sync_playwright() as p:
                     score_1 = extraire_note(analyse.get("match_tech"))
                     if score_1 >= SEUIL_CANDIDATURE:
                         analyse.update(generer_candidature_ia(analyse, texte_brut))
-                        avis_2 = verifier_avec_second_modele(texte_brut)
-                        analyse["score_modele_2"] = avis_2.get("match_tech", "N/A")
-                        analyse["verdict_modele_2"] = avis_2.get("verdict", "")
-                        analyse["accord_modeles"] = comparer_avis_modeles(score_1, avis_2.get("match_tech"))
 
                     if cle in offres_regroupees:
                         offres_regroupees[cle]["liens"].append(url)
@@ -521,8 +560,8 @@ with open(FICHIER_RAPPORT, "w", encoding="utf-8") as f_rapport:
             f_rapport.write(f"### {titre_complet}\n")
             f_rapport.write(f"- **Match DevSecOps :** {normaliser_champ(ia.get('match_tech'))}\n")
             f_rapport.write(f"- **Verdict :** {normaliser_champ(ia.get('verdict'))}\n")
-            if ia.get("accord_modeles"):
-                f_rapport.write(f"- **Vérification croisée ({MODELE_IA_VALIDATION}) :** {ia.get('accord_modeles')}\n")
+            if ia.get("ajustement_collaboratif"):
+                f_rapport.write(f"- **Analyse collaborative ({MODELE_IA} → {MODELE_IA_VALIDATION}) :** {ia.get('ajustement_collaboratif')}\n")
             f_rapport.write("- **Lien(s) disponible(s) :**\n")
             for lien in contenu["liens"]:
                 f_rapport.write(f"  - [Postuler ici]({lien})\n")
@@ -546,8 +585,8 @@ for titre_complet, contenu in offres_triees:
         "À Découvrir (Manquants)": normaliser_champ(ia.get('a_decouvrir', "Non précisé par l'IA")),
         "Verdict IA": normaliser_champ(ia.get('verdict', 'Pas de verdict')),
         "Lien de l'offre": contenu["liens"][0] if contenu["liens"] else "Aucun",
-        "Score IA #2 (vérification croisée)": ia.get('score_modele_2', ''),
-        "Accord entre modèles": ia.get('accord_modeles', ''),
+        "Score Initial (llama)": ia.get('score_initial', ''),
+        "Ajustement Collaboratif": ia.get('ajustement_collaboratif', ''),
         "Message LinkedIn": ia.get('message_linkedin', ''),
         "Lettre Motivation": ia.get('lettre_motivation', ''),
         "Statut": "",
