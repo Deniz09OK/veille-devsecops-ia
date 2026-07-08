@@ -410,12 +410,22 @@ for offre in recuperer_offres_france_travail(generer_recherches_ft(MOTS_CLES)):
     if url and url not in historique:
         texte = offre.get("description", "")
 
-        if filtre_logistique(texte) or "54" in str(offre.get("lieuTravail", {}).get("codePostal", "")):
+        code_postal = str(offre.get("lieuTravail", {}).get("codePostal", ""))
+        if filtre_logistique(texte) or code_postal.startswith("54"):
             time.sleep(2)  # Respect du rate-limit Groq
             analyse = analyser_technique_ia(texte, url)
 
             if analyse and "titre_poste" in analyse:
                 compteur_analyses += 1
+                # L'API France Travail fournit le nom de l'entreprise dans un
+                # champ structuré et fiable : on l'utilise en priorité plutôt
+                # que de laisser l'IA le deviner depuis le texte libre (où
+                # elle peut halluciner, ex: confondre avec un nom mentionné
+                # ailleurs dans l'offre).
+                nom_entreprise_api = offre.get("entreprise", {}).get("nom", "").strip()
+                if nom_entreprise_api:
+                    analyse["nom_entreprise"] = nom_entreprise_api
+
                 titre = normaliser_champ(analyse.get("titre_poste", "Poste Inconnu"))
                 entreprise = normaliser_champ(analyse.get("nom_entreprise", "Non précisé"))
                 cle = f"{titre} - {entreprise}"
