@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 from dotenv import load_dotenv
 from groq import Groq
+from mistralai.client import Mistral
 
 load_dotenv()
 
@@ -19,16 +20,21 @@ WEBHOOK_DISCORD = (os.getenv("WEBHOOK_DISCORD") or "").strip()
 FT_CLIENT_ID = (os.getenv("FT_CLIENT_ID") or "").strip()
 FT_CLIENT_SECRET = (os.getenv("FT_CLIENT_SECRET") or "").strip()
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY")
 
 client_ia = Groq(api_key=GROQ_API_KEY)
+client_mistral = Mistral(api_key=MISTRAL_API_KEY)
 
 GROUPE_ID = (os.getenv("GROUPE_ID") or "default").strip()
 FICHIER_HISTORIQUE = f"historique_offres_{GROUPE_ID}.json" if GROUPE_ID != "default" else "historique_offres.json"
 JOURS_MEMOIRE = 14
 MAX_ANALYSES_PAR_RUN = 15  # 🛑 Quota de sécurité pour ne pas saturer l'API Groq
 
-MODELE_IA = "openai/gpt-oss-20b"
-MODELE_IA_VALIDATION = "openai/gpt-oss-120b"
+# Étape 1 (rapide, gros volume) : Groq. Étape 2 (relecture critique, moins
+# fréquente) : Mistral — fournisseur différent, pour ne plus jamais perdre
+# les deux étapes d'un coup si un des deux déprécie un modèle.
+MODELE_IA = "openai/gpt-oss-20b"          # Groq
+MODELE_IA_VALIDATION = "mistral-small-latest"  # Mistral La Plateforme
 SEUIL_CANDIDATURE = 8.0
 
 PROFIL_CANDIDAT = """
@@ -373,13 +379,14 @@ def analyser_technique_ia(texte_offre, url_offre):
             )
             reponse_1 = client_ia.chat.completions.create(
                 model=MODELE_IA, messages=[{"role": "user", "content": prompt_initial}],
-                response_format={"type": "json_object"}, temperature=0.2
+                response_format={"type": "json_object"}, temperature=0.2,
+                reasoning_effort="low",
             )
             analyse_initiale = json.loads(reponse_1.choices[0].message.content)
             analyse_initiale["match_tech"] = valider_match_tech(analyse_initiale.get("match_tech", "5/10"))
             score_initial = analyse_initiale["match_tech"]
 
-            # --- ÉTAPE 2 : relecture critique et version finale (mixtral-8x7b-32768) ---
+            # --- ÉTAPE 2 : relecture critique et version finale (Mistral, fournisseur différent de l'étape 1) ---
             prompt_relecture = (
                 f"Tu es un second expert qui relit l'analyse d'un collègue pour l'améliorer "
                 f"avant validation finale. Profil du candidat: {PROFIL_CANDIDAT}.\n\n"
@@ -393,9 +400,9 @@ def analyser_technique_ia(texte_offre, url_offre):
                 f"'a_decouvrir', 'verdict') pour ta version finale. 'match_tech' doit être "
                 f"une VRAIE note, format \"X/10\", jamais la lettre N."
             )
-            reponse_2 = client_ia.chat.completions.create(
+            reponse_2 = client_mistral.chat.complete(
                 model=MODELE_IA_VALIDATION, messages=[{"role": "user", "content": prompt_relecture}],
-                response_format={"type": "json_object"}, temperature=0.2
+                response_format={"type": "json_object"}, temperature=0.2,
             )
             analyse_finale = json.loads(reponse_2.choices[0].message.content)
             analyse_finale["match_tech"] = valider_match_tech(analyse_finale.get("match_tech", score_initial))
