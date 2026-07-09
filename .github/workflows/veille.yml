@@ -33,7 +33,7 @@ jobs:
         run: |
           pip install --upgrade pip
           # Ollama est supprimé. Ajout de groq et sentence-transformers (pour ChromaDB)
-          pip install requests playwright python-dotenv chromadb pandas openpyxl groq sentence-transformers
+          pip install requests playwright python-dotenv chromadb pandas openpyxl groq sentence-transformers mistralai
 
       - name: Installer Chromium pour Playwright
         run: playwright install --with-deps chromium
