@@ -2,13 +2,15 @@ name: Veille DevSecOps
 
 on:
   schedule:
-    - cron: '0 6 * * *'
+    - cron: '0 6 * * *'  # 8h heure de Paris (UTC+2)
   workflow_dispatch: {}
+
+concurrency:
+  group: veille-devsecops
+  cancel-in-progress: false
 
 jobs:
   veille:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30 # Le job ne prendra que quelques minutes maintenant !
     strategy:
       fail-fast: false
       matrix:
@@ -19,9 +21,10 @@ jobs:
             mots_cles: "DevSecOps,DevOps,Cloud Builder,Ingénieur Cloud,Ingénieur DevOps"
           - groupe_id: infra-sre
             mots_cles: "Site Reliability Engineer (SRE),Ingénieur Système et Réseau,Ingénieur de Production IT et Release Engineer"
-
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - name: Récupérer le dépôt
+      - name: Checkout du dépôt
         uses: actions/checkout@v4
 
       - name: Installer Python
@@ -35,10 +38,10 @@ jobs:
           # Ollama est supprimé. Ajout de groq et sentence-transformers (pour ChromaDB)
           pip install requests playwright python-dotenv chromadb pandas openpyxl groq sentence-transformers mistralai
 
-      - name: Installer Chromium pour Playwright
+      - name: Installer Chromium (Playwright)
         run: playwright install --with-deps chromium
 
-      - name: Restaurer l'état de la veille (mémoire IA, historique, Excel, rapports)
+      - name: Restaurer l'état de la veille (mémoire IA, historique, Excel)
         uses: actions/cache/restore@v4
         with:
           path: |
@@ -48,9 +51,10 @@ jobs:
             Historique
           key: v2-etat-veille-${{ matrix.groupe_id }}-${{ github.run_id }}
           restore-keys: |
-            etat-veille-${{ matrix.groupe_id }}-
+            v2-etat-veille-${{ matrix.groupe_id }}-
 
-      - name: Lancer le script de veille - Groupe ${{ matrix.groupe_id }}
+      - name: Lancer le script de veille
+        run: python veille_devsecops.py
         env:
           FT_CLIENT_ID: ${{ secrets.FT_CLIENT_ID }}
           FT_CLIENT_SECRET: ${{ secrets.FT_CLIENT_SECRET }}
@@ -59,7 +63,6 @@ jobs:
           MOTS_CLES_GROUPE: ${{ matrix.mots_cles }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
-        run: python veille_devsecops.py
 
       - name: Sauvegarder l'état de la veille pour le prochain run
         if: always()
@@ -72,8 +75,7 @@ jobs:
             Historique
           key: v2-etat-veille-${{ matrix.groupe_id }}-${{ github.run_id }}
 
-      - name: Publier les résultats
-        if: always()
+      - name: Uploader les résultats du groupe
         uses: actions/upload-artifact@v4
         with:
           name: veille-devsecops-${{ matrix.groupe_id }}-${{ github.run_id }}
@@ -81,6 +83,7 @@ jobs:
             suivi_candidatures_${{ matrix.groupe_id }}.xlsx
             Historique
           retention-days: 30
+          if-no-files-found: warn
 
   fusionner:
     needs: veille
@@ -88,17 +91,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - name: Télécharger tous les résultats des groupes
+      - name: Télécharger les résultats des 3 groupes
         uses: actions/download-artifact@v4
         with:
           pattern: veille-devsecops-*-${{ github.run_id }}
           path: resultats-bruts
           merge-multiple: false
 
-      - name: Installer les dépendances de fusion
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Installer les dépendances Python
         run: pip install pandas openpyxl
 
-      - name: Fusionner les fichiers Excel des 3 groupes en un seul Master
+      - name: Fusionner les Excel des 3 groupes
         run: |
           python - <<'EOF'
           import glob
@@ -113,8 +121,7 @@ jobs:
               print(f"✅ Fusion terminée : {len(df_final)} offre(s) au total.")
           EOF
 
-      - name: Publier le tableau de bord Excel fusionné
-        if: always()
+      - name: Uploader l'Excel Master
         uses: actions/upload-artifact@v4
         with:
           name: veille-devsecops-MASTER-${{ github.run_id }}
@@ -122,10 +129,9 @@ jobs:
             suivi_candidatures_MASTER.xlsx
             resultats-bruts
           retention-days: 30
+          if-no-files-found: warn
 
-      # (J'ai conservé tes étapes d'extraction de résumé et d'envoi d'e-mail ici à l'identique)
-      - name: Extraire un résumé pour l'e-mail
-        if: always()
+      - name: Extraire le résumé pour l'e-mail
         id: stats
         run: |
           python - <<'EOF' >> "$GITHUB_OUTPUT"
@@ -151,7 +157,6 @@ jobs:
           EOF
 
       - name: Envoyer l'e-mail de fin de pipeline
-        if: always()
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
