@@ -9,7 +9,6 @@ from datetime import datetime, timedelta
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 from dotenv import load_dotenv
 from groq import Groq
-from mistralai.client import Mistral
 
 load_dotenv()
 
@@ -20,21 +19,36 @@ WEBHOOK_DISCORD = (os.getenv("WEBHOOK_DISCORD") or "").strip()
 FT_CLIENT_ID = (os.getenv("FT_CLIENT_ID") or "").strip()
 FT_CLIENT_SECRET = (os.getenv("FT_CLIENT_SECRET") or "").strip()
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY")
 
 client_ia = Groq(api_key=GROQ_API_KEY)
-client_mistral = Mistral(api_key=MISTRAL_API_KEY)
 
 GROUPE_ID = (os.getenv("GROUPE_ID") or "default").strip()
+
+# Liens GitHub vers les CV adaptés à chaque groupe (dossier cv/ à la racine
+# du repo). Utilisés dans l'Excel pour retrouver rapidement le bon CV à
+# joindre à une candidature — design pour un envoi manuel/LinkedIn, ATS pour
+# un formulaire en ligne qui reparse le texte du CV.
+_REPO_BASE = "https://github.com/Deniz09OK/veille-devsecops-ia/blob/main/cv"
+CV_PAR_GROUPE = {
+    "secu": {
+        "design": f"{_REPO_BASE}/CV_Deniz_OK_secu.pdf",
+        "ats": f"{_REPO_BASE}/CV_Deniz_OK_ATS_secu.pdf",
+    },
+    "cloud-devops": {
+        "design": f"{_REPO_BASE}/CV_Deniz_OK_cloud-devops.pdf",
+        "ats": f"{_REPO_BASE}/CV_Deniz_OK_ATS_cloud-devops.pdf",
+    },
+    "infra-sre": {
+        "design": f"{_REPO_BASE}/CV_Deniz_OK_infra-sre.pdf",
+        "ats": f"{_REPO_BASE}/CV_Deniz_OK_ATS_infra-sre.pdf",
+    },
+}
 FICHIER_HISTORIQUE = f"historique_offres_{GROUPE_ID}.json" if GROUPE_ID != "default" else "historique_offres.json"
 JOURS_MEMOIRE = 14
 MAX_ANALYSES_PAR_RUN = 15  # 🛑 Quota de sécurité pour ne pas saturer l'API Groq
 
-# Étape 1 (rapide, gros volume) : Groq. Étape 2 (relecture critique, moins
-# fréquente) : Mistral — fournisseur différent, pour ne plus jamais perdre
-# les deux étapes d'un coup si un des deux déprécie un modèle.
-MODELE_IA = "openai/gpt-oss-20b"          # Groq
-MODELE_IA_VALIDATION = "mistral-small-latest"  # Mistral La Plateforme
+MODELE_IA = "openai/gpt-oss-20b"
+MODELE_IA_VALIDATION = "openai/gpt-oss-120b"
 SEUIL_CANDIDATURE = 8.0
 
 PROFIL_CANDIDAT = """
@@ -379,14 +393,13 @@ def analyser_technique_ia(texte_offre, url_offre):
             )
             reponse_1 = client_ia.chat.completions.create(
                 model=MODELE_IA, messages=[{"role": "user", "content": prompt_initial}],
-                response_format={"type": "json_object"}, temperature=0.2,
-                reasoning_effort="low",
+                response_format={"type": "json_object"}, temperature=0.2
             )
             analyse_initiale = json.loads(reponse_1.choices[0].message.content)
             analyse_initiale["match_tech"] = valider_match_tech(analyse_initiale.get("match_tech", "5/10"))
             score_initial = analyse_initiale["match_tech"]
 
-            # --- ÉTAPE 2 : relecture critique et version finale (Mistral, fournisseur différent de l'étape 1) ---
+            # --- ÉTAPE 2 : relecture critique et version finale (mixtral-8x7b-32768) ---
             prompt_relecture = (
                 f"Tu es un second expert qui relit l'analyse d'un collègue pour l'améliorer "
                 f"avant validation finale. Profil du candidat: {PROFIL_CANDIDAT}.\n\n"
@@ -400,9 +413,9 @@ def analyser_technique_ia(texte_offre, url_offre):
                 f"'a_decouvrir', 'verdict') pour ta version finale. 'match_tech' doit être "
                 f"une VRAIE note, format \"X/10\", jamais la lettre N."
             )
-            reponse_2 = client_mistral.chat.complete(
+            reponse_2 = client_ia.chat.completions.create(
                 model=MODELE_IA_VALIDATION, messages=[{"role": "user", "content": prompt_relecture}],
-                response_format={"type": "json_object"}, temperature=0.2,
+                response_format={"type": "json_object"}, temperature=0.2
             )
             analyse_finale = json.loads(reponse_2.choices[0].message.content)
             analyse_finale["match_tech"] = valider_match_tech(analyse_finale.get("match_tech", score_initial))
@@ -581,6 +594,7 @@ print("📊 Mise à jour du fichier Excel...")
 FICHIER_EXCEL = f"suivi_candidatures_{GROUPE_ID}.xlsx" if GROUPE_ID != "default" else "suivi_candidatures.xlsx"
 
 donnees_excel = []
+_cv_groupe = CV_PAR_GROUPE.get(GROUPE_ID, {})
 for titre_complet, contenu in offres_triees:
     ia = contenu["donnees_ia"]
     donnees_excel.append({
@@ -594,6 +608,8 @@ for titre_complet, contenu in offres_triees:
         "Lien de l'offre": contenu["liens"][0] if contenu["liens"] else "Aucun",
         "Score Initial (llama)": ia.get('score_initial', ''),
         "Ajustement Collaboratif": ia.get('ajustement_collaboratif', ''),
+        "CV (design)": _cv_groupe.get("design", ""),
+        "CV (ATS)": _cv_groupe.get("ats", ""),
         "Message LinkedIn": ia.get('message_linkedin', ''),
         "Lettre Motivation": ia.get('lettre_motivation', ''),
         "Statut": "",
