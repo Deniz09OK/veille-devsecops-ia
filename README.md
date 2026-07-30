@@ -18,7 +18,7 @@ Agent autonome qui automatise la recherche, le filtrage et l'évaluation techniq
 - 🔗 Un job **`fusionner`** rassemble les résultats des 3 groupes en un seul **Excel Master**, dédupliqué par lien d'offre
 
 ### Filtrage (avant de consommer du temps IA)
-- 🚪 **Filtre géographique strict** : "Nancy"/54/Meurthe-et-Moselle valide toujours l'offre. Toute autre ville n'est acceptée qu'avec un signal **non ambigu** de télétravail intégral (`100% télétravail`, `full remote`...) — le simple mot "télétravail"/"remote" isolé ne suffit plus (il peut apparaître dans la navigation générique d'un site, sans rapport avec l'offre elle-même)
+- 🚪 **Filtre géographique strict** : "Nancy"/54/Meurthe-et-Moselle valide toujours l'offre, tout comme Metz, Thionville, Sarrebourg, Bar-le-Duc et Épinal (villes accessibles en TER direct depuis Nancy — candidat sans permis). Toute autre ville n'est acceptée qu'avec un signal **non ambigu** de télétravail intégral (`100% télétravail`, `full remote`...) — le simple mot "télétravail"/"remote" isolé ne suffit plus (il peut apparaître dans la navigation générique d'un site, sans rapport avec l'offre elle-même)
 - 📋 **Filtre type de contrat** : exige la présence explicite d'un terme d'alternance/apprentissage — écarte les CDI/CDD classiques
 - 🎓 **Anti-écoles concurrentes** : liste noire (ISCOD, CESI, OpenClassrooms, EPSI, Sup de Vinci…)
 - 🔁 **Anti-doublons** : mémoire de 14 jours par groupe (`historique_offres_<groupe>.json`), avec normalisation des URLs (APEC/Indeed) et du code postal (comparaison stricte du département, pas une recherche de sous-chaîne)
@@ -192,7 +192,7 @@ Déclenchement : automatique tous les jours (`cron`), ou manuel via l'onglet **A
 |---|---|---|
 | Groupes et répartition des mots-clés | `matrix.include` dans `veille.yml` | 3 groupes (secu / cloud-devops / infra-sre) |
 | Liste complète des mots-clés | `MOTS_CLES_COMPLETS` | 13 intitulés (SecOps → Release Engineer) |
-| Zone géographique | `filtre_logistique()` | Nancy / 54 / télétravail intégral non ambigu |
+| Zone géographique | `filtre_logistique()` / `code_postal_accepte()` | Nancy / 54 / Metz / Thionville / Sarrebourg / Bar-le-Duc / Épinal / télétravail intégral non ambigu |
 | Terme de contrat exigé | `filtre_type_contrat()` | alternance, apprentissage, contrat de pro |
 | CV recommandé par groupe | `CV_PAR_GROUPE` | liens vers `cv/CV_Deniz_OK_<groupe>[_ATS].pdf` |
 | Seuil de génération de candidature | `SEUIL_CANDIDATURE` | 8.0 / 10 |

@@ -7,7 +7,7 @@ from .core.config import GROUPE_ID, MOTS_CLES, MAX_ANALYSES_PAR_RUN, SEUIL_CANDI
 from .collecte.sources_scraping import SOURCES_RECHERCHE
 from .core.utils import normaliser_url_offre, normaliser_champ, extraire_note
 from .core.historique import charger_historique, ecrire_historique
-from .core.filtres import filtre_logistique, filtre_type_contrat, filtre_secteur_public
+from .core.filtres import filtre_logistique, filtre_type_contrat, filtre_secteur_public, code_postal_accepte
 from .collecte.france_travail import generer_recherches_ft, recuperer_offres_france_travail
 from .collecte.scraping import extraire_liens, lire_texte_offre
 from .ia.analyse_ia import analyser_technique_ia, generer_candidature_ia
@@ -37,7 +37,11 @@ def executer():
             texte_filtre = f"{texte} {offre.get('entreprise', {}).get('nom', '')}"
 
             code_postal = str(offre.get("lieuTravail", {}).get("codePostal", ""))
-            if (filtre_logistique(texte) or code_postal.startswith("54")) and filtre_type_contrat(texte) and filtre_secteur_public(texte_filtre):
+            # filtre_type_contrat n'est pas réappliqué ici : natureContrat=E2 dans
+            # generer_recherches_ft() garantit déjà qu'il s'agit d'un contrat
+            # d'apprentissage, et le texte libre de la description ne répète pas
+            # toujours ce mot (offres légitimes rejetées à tort sinon).
+            if (filtre_logistique(texte) or code_postal_accepte(code_postal)) and filtre_secteur_public(texte_filtre):
                 time.sleep(2)  # Respect du rate-limit Groq
                 analyse = analyser_technique_ia(texte, url)
 
