@@ -7,7 +7,7 @@ from .core.config import GROUPE_ID, MOTS_CLES, MAX_ANALYSES_PAR_RUN, SEUIL_CANDI
 from .collecte.sources_scraping import SOURCES_RECHERCHE
 from .core.utils import normaliser_url_offre, normaliser_champ, extraire_note
 from .core.historique import charger_historique, ecrire_historique
-from .core.filtres import filtre_logistique, filtre_type_contrat
+from .core.filtres import filtre_logistique, filtre_type_contrat, filtre_secteur_public
 from .collecte.france_travail import generer_recherches_ft, recuperer_offres_france_travail
 from .collecte.scraping import extraire_liens, lire_texte_offre
 from .ia.analyse_ia import analyser_technique_ia, generer_candidature_ia
@@ -34,9 +34,10 @@ def executer():
         url = normaliser_url_offre(offre.get("origineOffre", {}).get("urlOrigine", ""))
         if url and url not in historique:
             texte = offre.get("description", "")
+            texte_filtre = f"{texte} {offre.get('entreprise', {}).get('nom', '')}"
 
             code_postal = str(offre.get("lieuTravail", {}).get("codePostal", ""))
-            if (filtre_logistique(texte) or code_postal.startswith("54")) and filtre_type_contrat(texte):
+            if (filtre_logistique(texte) or code_postal.startswith("54")) and filtre_type_contrat(texte) and filtre_secteur_public(texte_filtre):
                 time.sleep(2)  # Respect du rate-limit Groq
                 analyse = analyser_technique_ia(texte, url)
 
@@ -90,7 +91,7 @@ def executer():
                 texte_brut = lire_texte_offre(contexte, url_brute)
                 historique[url] = datetime.now().isoformat()
 
-                if texte_brut and filtre_logistique(texte_brut) and filtre_type_contrat(texte_brut):
+                if texte_brut and filtre_logistique(texte_brut) and filtre_type_contrat(texte_brut) and filtre_secteur_public(texte_brut):
                     print(f"🧠 Analyse IA (Scraping) : {url.split('/')[-1][:30]}...")
                     time.sleep(2)  # Respect du rate-limit Groq
                     analyse = analyser_technique_ia(texte_brut, url)

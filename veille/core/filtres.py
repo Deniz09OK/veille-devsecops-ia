@@ -33,3 +33,23 @@ def filtre_type_contrat(texte_brut):
     texte = texte_brut.lower()
     mots_alternance = ["alternance", "alternant", "apprentissage", "contrat de professionnalisation", "contrat d'apprentissage"]
     return any(mot in texte for mot in mots_alternance)
+
+
+def filtre_secteur_public(texte_brut):
+    """Rejette les offres émanant du secteur public / de la fonction publique.
+    Les collectivités, ministères et établissements publics proposent aussi des
+    contrats d'apprentissage (donc passent filtre_type_contrat), mais ce ne sont
+    pas les alternances en entreprise privée recherchées ici."""
+    if not texte_brut:
+        return True
+    texte = texte_brut.lower()
+    signaux_public = [
+        "fonction publique", "collectivité territoriale", "collectivité locale",
+        "établissement public", "conseil départemental", "conseil régional",
+        "métropole du grand", "métropole de", "communauté de communes",
+        "communauté d'agglomération", "communauté urbaine", "mairie de",
+        "ministère", "préfecture", "commissariat", "centre hospitalier",
+        "statut de fonctionnaire", "cadre d'emplois", "contrat pacte",
+        "gendarmerie", "service départemental d'incendie",
+    ]
+    return not any(s in texte for s in signaux_public)
