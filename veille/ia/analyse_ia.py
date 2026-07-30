@@ -1,23 +1,43 @@
 import json
 import time
 
-from ..core.config import client_ia, MODELE_IA, MODELE_IA_VALIDATION, PROFIL_CANDIDAT, collection_ia
+import requests
+
+from ..core.config import client_ia, MISTRAL_API_KEY, MODELE_IA, MODELE_IA_VALIDATION, PROFIL_CANDIDAT, collection_ia
 from ..core.utils import valider_match_tech, comparer_scores
 
 # ==========================================
-# ANALYSE IA (Groq, avec mémoire RAG ChromaDB)
+# ANALYSE IA (Groq + Mistral, avec mémoire RAG ChromaDB)
 # ==========================================
+
+
+def appeler_mistral(messages):
+    """Appelle l'API Mistral (chat completions, format compatible OpenAI)
+    en HTTP direct plutôt que via le SDK officiel."""
+    reponse = requests.post(
+        "https://api.mistral.ai/v1/chat/completions",
+        headers={"Authorization": f"Bearer {MISTRAL_API_KEY}", "Content-Type": "application/json"},
+        json={
+            "model": MODELE_IA_VALIDATION,
+            "messages": messages,
+            "response_format": {"type": "json_object"},
+            "temperature": 0.2,
+        },
+        timeout=30,
+    )
+    reponse.raise_for_status()
+    return reponse.json()["choices"][0]["message"]["content"]
 
 
 def analyser_technique_ia(texte_offre, url_offre):
     """Analyse collaborative à deux modèles :
-    1. llama-3.1-8b-instant produit une première analyse (rapide, bon rapport qualité/vitesse).
-    2. mixtral-8x7b-32768 relit cette analyse de façon critique, corrige les erreurs
+    1. llama-3.1-8b-instant (Groq) produit une première analyse (rapide, bon rapport qualité/vitesse).
+    2. mistral-large-latest (API Mistral) relit cette analyse de façon critique, corrige les erreurs
        (score mal calibré, entreprise mal identifiée, compétence oubliée) et produit
        la version FINALE. Ce n'est pas une simple double-vérification après coup :
        le second modèle voit le travail du premier et l'améliore directement.
     Le score initial de llama est conservé à part (traçabilité), mais c'est la
-    version de mixtral qui fait foi partout ailleurs (Excel, Discord, seuils)."""
+    version de mistral qui fait foi partout ailleurs (Excel, Discord, seuils)."""
     max_retries = 3
     for attempt in range(max_retries):
         try:
@@ -43,7 +63,7 @@ def analyser_technique_ia(texte_offre, url_offre):
             analyse_initiale["match_tech"] = valider_match_tech(analyse_initiale.get("match_tech", "5/10"))
             score_initial = analyse_initiale["match_tech"]
 
-            # --- ÉTAPE 2 : relecture critique et version finale (mixtral-8x7b-32768) ---
+            # --- ÉTAPE 2 : relecture critique et version finale (mistral-large-latest) ---
             prompt_relecture = (
                 f"Tu es un second expert qui relit l'analyse d'un collègue pour l'améliorer "
                 f"avant validation finale. Profil du candidat: {PROFIL_CANDIDAT}.\n\n"
@@ -57,11 +77,8 @@ def analyser_technique_ia(texte_offre, url_offre):
                 f"'a_decouvrir', 'verdict') pour ta version finale. 'match_tech' doit être "
                 f"une VRAIE note, format \"X/10\", jamais la lettre N."
             )
-            reponse_2 = client_ia.chat.completions.create(
-                model=MODELE_IA_VALIDATION, messages=[{"role": "user", "content": prompt_relecture}],
-                response_format={"type": "json_object"}, temperature=0.2
-            )
-            analyse_finale = json.loads(reponse_2.choices[0].message.content)
+            contenu_reponse_2 = appeler_mistral([{"role": "user", "content": prompt_relecture}])
+            analyse_finale = json.loads(contenu_reponse_2)
             analyse_finale["match_tech"] = valider_match_tech(analyse_finale.get("match_tech", score_initial))
 
             # Traçabilité : on garde le score initial et un résumé de l'ajustement

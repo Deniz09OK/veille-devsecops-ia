@@ -13,6 +13,7 @@ WEBHOOK_DISCORD = (os.getenv("WEBHOOK_DISCORD") or "").strip()
 FT_CLIENT_ID = (os.getenv("FT_CLIENT_ID") or "").strip()
 FT_CLIENT_SECRET = (os.getenv("FT_CLIENT_SECRET") or "").strip()
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY")
 
 client_ia = Groq(api_key=GROQ_API_KEY)
 
@@ -41,8 +42,8 @@ FICHIER_HISTORIQUE = f"historique_offres_{GROUPE_ID}.json" if GROUPE_ID != "defa
 JOURS_MEMOIRE = 14
 MAX_ANALYSES_PAR_RUN = 15  # 🛑 Quota de sécurité pour ne pas saturer l'API Groq
 
-MODELE_IA = "openai/gpt-oss-20b"
-MODELE_IA_VALIDATION = "openai/gpt-oss-120b"
+MODELE_IA = "llama-3.1-8b-instant"  # Groq
+MODELE_IA_VALIDATION = "mistral-large-latest"  # API Mistral
 SEUIL_CANDIDATURE = 8.0
 
 PROFIL_CANDIDAT = """
