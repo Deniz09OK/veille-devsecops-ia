@@ -1,6 +1,7 @@
 import json
 import time
 
+import groq
 import requests
 
 from ..core.config import client_ia, MISTRAL_API_KEY, MODELE_IA, MODELE_IA_VALIDATION, PROFIL_CANDIDAT, collection_ia
@@ -10,8 +11,35 @@ from ..core.utils import valider_match_tech, comparer_scores
 # ANALYSE IA (Groq + Mistral, avec mémoire RAG ChromaDB)
 # ==========================================
 
+# Schéma strict de la version finale (étape 2, Mistral) : force la présence de
+# toutes les clés attendues et le format "X/10" pour match_tech, plutôt que de
+# rattraper après coup une réponse mal formée (cf. valider_match_tech).
+# Non applicable à l'étape 1 (llama-3.1-8b-instant) : Groq ne supporte le
+# response_format json_schema strict que sur une liste restreinte de modèles
+# (llama-3.1-8b-instant n'en fait pas partie, vérifié en direct sur l'API).
+SCHEMA_ANALYSE_FINALE = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "analyse_offre",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "titre_poste": {"type": "string"},
+                "nom_entreprise": {"type": "string"},
+                "match_tech": {"type": "string", "pattern": r"^\d{1,2}(\.\d)?/10$"},
+                "points_forts": {"type": "string"},
+                "a_decouvrir": {"type": "string"},
+                "verdict": {"type": "string"},
+            },
+            "required": ["titre_poste", "nom_entreprise", "match_tech", "points_forts", "a_decouvrir", "verdict"],
+            "additionalProperties": False,
+        },
+    },
+}
 
-def appeler_mistral(messages):
+
+def appeler_mistral(messages, response_format=None):
     """Appelle l'API Mistral (chat completions, format compatible OpenAI)
     en HTTP direct plutôt que via le SDK officiel."""
     reponse = requests.post(
@@ -20,7 +48,7 @@ def appeler_mistral(messages):
         json={
             "model": MODELE_IA_VALIDATION,
             "messages": messages,
-            "response_format": {"type": "json_object"},
+            "response_format": response_format or {"type": "json_object"},
             "temperature": 0.2,
         },
         timeout=30,
@@ -77,7 +105,7 @@ def analyser_technique_ia(texte_offre, url_offre):
                 f"'a_decouvrir', 'verdict') pour ta version finale. 'match_tech' doit être "
                 f"une VRAIE note, format \"X/10\", jamais la lettre N."
             )
-            contenu_reponse_2 = appeler_mistral([{"role": "user", "content": prompt_relecture}])
+            contenu_reponse_2 = appeler_mistral([{"role": "user", "content": prompt_relecture}], response_format=SCHEMA_ANALYSE_FINALE)
             analyse_finale = json.loads(contenu_reponse_2)
             analyse_finale["match_tech"] = valider_match_tech(analyse_finale.get("match_tech", score_initial))
 
@@ -88,10 +116,16 @@ def analyser_technique_ia(texte_offre, url_offre):
             collection_ia.upsert(ids=[url_offre], documents=[texte_offre[:3000]], metadatas=[{"score": analyse_finale["match_tech"]}])
             return analyse_finale
 
-        except Exception as e:
-            if "429" in str(e):
+        except groq.RateLimitError:
+            time.sleep(20)
+            continue
+        except requests.exceptions.HTTPError as e:
+            if e.response is not None and e.response.status_code == 429:
                 time.sleep(20)
                 continue
+            print(f"   ⚠️ Erreur Mistral : {e}")
+            return None
+        except Exception as e:
             print(f"   ⚠️ Erreur : {e}")
             return None
     return None

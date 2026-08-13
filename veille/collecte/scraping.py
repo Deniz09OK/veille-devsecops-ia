@@ -1,3 +1,5 @@
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
 # ==========================================
 # MOTEUR 2 : SCRAPING PLAYWRIGHT
 # ==========================================
@@ -8,7 +10,11 @@ def extraire_liens(page, config):
     try:
         page.goto(config["url"], timeout=20000)
         page.wait_for_selector(config["aimant_css"], timeout=10000)
-    except Exception:
+    except PlaywrightTimeoutError:
+        print(f"   ⏱️ Timeout sur {config['nom']} (page lente ou sélecteur \"{config['aimant_css']}\" introuvable — le site a peut-être changé)")
+        return []
+    except Exception as e:
+        print(f"   ⚠️ Erreur sur {config['nom']} : {e}")
         return []
     liens_propres = []
     for el in page.locator(config["aimant_css"]).all():

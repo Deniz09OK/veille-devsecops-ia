@@ -15,7 +15,7 @@ FT_CLIENT_SECRET = (os.getenv("FT_CLIENT_SECRET") or "").strip()
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY")
 
-client_ia = Groq(api_key=GROQ_API_KEY)
+client_ia = Groq(api_key=GROQ_API_KEY, max_retries=3)
 
 GROUPE_ID = (os.getenv("GROUPE_ID") or "default").strip()
 
