@@ -37,6 +37,7 @@ JOURS_MEMOIRE = 14
 MAX_ANALYSES_PAR_RUN = 15  
 MODELE_IA = "openai/gpt-oss-20b"  # 
 MODELE_IA_VALIDATION = "mistral-small-latest"  # Mistral — mistral-large-latest n'est pas inclus dans le plan gratuit Experiment (erreur API "tier_not_allowed")
+SEUIL_CANDIDATURE = 8.0
 
 PROFIL_CANDIDAT = """
 - Sécurité : Metasploit, Burp Suite, Nmap, Hydra, Wireshark, John the Ripper, Gobuster, Kali Linux.
