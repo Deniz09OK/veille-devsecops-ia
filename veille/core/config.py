@@ -6,23 +6,17 @@ from groq import Groq
 
 load_dotenv()
 
-# ==========================================
-# CONFIGURATION ET SECRETS
-# ==========================================
 WEBHOOK_DISCORD = (os.getenv("WEBHOOK_DISCORD") or "").strip()
 FT_CLIENT_ID = (os.getenv("FT_CLIENT_ID") or "").strip()
 FT_CLIENT_SECRET = (os.getenv("FT_CLIENT_SECRET") or "").strip()
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY")
+LBA_API_KEY = (os.getenv("LBA_API_KEY") or "").strip()
+GROQ_API_KEY = (os.environ.get("GROQ_API_KEY") or "").strip()
+MISTRAL_API_KEY = (os.environ.get("MISTRAL_API_KEY") or "").strip()
 
 client_ia = Groq(api_key=GROQ_API_KEY, max_retries=3)
 
 GROUPE_ID = (os.getenv("GROUPE_ID") or "default").strip()
 
-# Liens GitHub vers les CV adaptés à chaque groupe (dossier cv/ à la racine
-# du repo). Utilisés dans l'Excel pour retrouver rapidement le bon CV à
-# joindre à une candidature — design pour un envoi manuel/LinkedIn, ATS pour
-# un formulaire en ligne qui reparse le texte du CV.
 _REPO_BASE = "https://github.com/Deniz09OK/veille-devsecops-ia/blob/main/cv"
 CV_PAR_GROUPE = {
     "secu": {
@@ -40,11 +34,9 @@ CV_PAR_GROUPE = {
 }
 FICHIER_HISTORIQUE = f"historique_offres_{GROUPE_ID}.json" if GROUPE_ID != "default" else "historique_offres.json"
 JOURS_MEMOIRE = 14
-MAX_ANALYSES_PAR_RUN = 15  # 🛑 Quota de sécurité pour ne pas saturer l'API Groq
-
-MODELE_IA = "llama-3.1-8b-instant"  # Groq
-MODELE_IA_VALIDATION = "mistral-large-latest"  # API Mistral
-SEUIL_CANDIDATURE = 8.0
+MAX_ANALYSES_PAR_RUN = 15  
+MODELE_IA = "openai/gpt-oss-20b"  # 
+MODELE_IA_VALIDATION = "mistral-small-latest"  # Mistral — mistral-large-latest n'est pas inclus dans le plan gratuit Experiment (erreur API "tier_not_allowed")
 
 PROFIL_CANDIDAT = """
 - Sécurité : Metasploit, Burp Suite, Nmap, Hydra, Wireshark, John the Ripper, Gobuster, Kali Linux.
@@ -76,6 +68,13 @@ if _filtre_env:
     MOTS_CLES = [m for m in MOTS_CLES_COMPLETS if m in _mots_demandes]
 else:
     MOTS_CLES = MOTS_CLES_COMPLETS
+
+ROME_PAR_GROUPE = {
+    "secu": ["M1802"],
+    "cloud-devops": ["M1801"],
+    "infra-sre": ["M1810"],
+}
+ROME_PAR_DEFAUT = ["M1801", "M1802", "M1810"]
 
 LOCALISATION = "Nancy"
 

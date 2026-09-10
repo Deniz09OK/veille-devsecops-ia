@@ -9,6 +9,7 @@ from .core.utils import normaliser_url_offre, normaliser_champ, extraire_note
 from .core.historique import charger_historique, ecrire_historique
 from .core.filtres import filtre_logistique, filtre_type_contrat, filtre_secteur_public, code_postal_accepte
 from .collecte.france_travail import generer_recherches_ft, recuperer_offres_france_travail
+from .collecte.la_bonne_alternance import generer_recherches_lba, recuperer_offres_la_bonne_alternance
 from .collecte.scraping import extraire_liens, lire_texte_offre
 from .ia.analyse_ia import analyser_technique_ia, generer_candidature_ia
 from .sortie.notifications import envoyer_discord
@@ -73,7 +74,51 @@ def executer():
 
             historique[url] = datetime.now().isoformat()
 
-    # --- 2. TRAITEMENT PLAYWRIGHT (Scraping) ---
+    # --- 2. TRAITEMENT API LA BONNE ALTERNANCE ---
+    for offre in recuperer_offres_la_bonne_alternance(generer_recherches_lba()):
+        if compteur_analyses >= MAX_ANALYSES_PAR_RUN:
+            print(f"🛑 Quota de {MAX_ANALYSES_PAR_RUN} analyses atteint, arrêt anticipé (La Bonne Alternance).")
+            break
+
+        url = normaliser_url_offre((offre.get("apply") or {}).get("url", ""))
+        if url and url not in historique:
+            workplace = offre.get("workplace") or {}
+            offer_data = offre.get("offer") or {}
+            nom_entreprise = (workplace.get("name") or workplace.get("legal_name") or workplace.get("brand") or "").strip()
+            adresse = (workplace.get("location") or {}).get("address", "")
+            texte_ia = f"{offer_data.get('title', '')}. {offer_data.get('description', '')} Compétences : {', '.join(offer_data.get('desired_skills') or [])}"
+            # filtre_logistique() est réutilisé ici pour la zone géographique
+            # (via l'adresse) ET la liste noire des écoles concurrentes ; on
+            # lui passe donc un texte élargi, pas le texte destiné à l'IA.
+            texte_verif = f"{texte_ia} {adresse} {nom_entreprise}"
+
+            if filtre_logistique(texte_verif) and filtre_secteur_public(texte_verif):
+                time.sleep(2)  # Respect du rate-limit Groq
+                analyse = analyser_technique_ia(texte_ia, url)
+
+                if analyse and "titre_poste" in analyse:
+                    compteur_analyses += 1
+                    if nom_entreprise:
+                        analyse["nom_entreprise"] = nom_entreprise
+
+                    titre = normaliser_champ(analyse.get("titre_poste", "Poste Inconnu"))
+                    entreprise = normaliser_champ(analyse.get("nom_entreprise", "Non précisé"))
+                    cle = f"{titre} - {entreprise}"
+                    analyse["match_logistique"] = "10/10 (Validé par filtre Python)"
+
+                    score_1 = extraire_note(analyse.get("match_tech"))
+                    if score_1 >= SEUIL_CANDIDATURE:
+                        analyse.update(generer_candidature_ia(analyse, texte_ia))
+
+                    if cle in offres_regroupees:
+                        offres_regroupees[cle]["liens"].append(url)
+                    else:
+                        offres_regroupees[cle] = {"donnees_ia": analyse, "liens": [url]}
+                        envoyer_discord(cle, url, analyse.get("match_tech", "N/A"))
+
+            historique[url] = datetime.now().isoformat()
+
+    # --- 3. TRAITEMENT PLAYWRIGHT (Scraping) ---
     with sync_playwright() as p:
         navigateur = p.chromium.launch(headless=True)
         contexte = navigateur.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0")

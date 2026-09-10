@@ -10,7 +10,6 @@ memoire_ia/
 historique_offres.json
 suivi_candidatures.xlsx
 Historique/
-
 *.log
 
 .DS_Store

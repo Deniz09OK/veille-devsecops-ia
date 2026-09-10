@@ -10,6 +10,7 @@ Agent autonome qui automatise la recherche, le filtrage et l'évaluation techniq
 
 ### Recherche & collecte
 - 🌍 **API France Travail (Offres d'emploi v2)** : OAuth2 *client credentials*, recherches ciblées Nancy 30 km + France entière par mot-clé, filtrées `natureContrat=E2` (alternance)
+- 🎓 **API La Bonne Alternance** (`api.apprentissage.beta.gouv.fr`) : agrégateur officiel de l'État dédié à l'alternance (France Travail + CFA + entreprises), interrogé par **code ROME** plutôt que mot-clé — une recherche locale (départements 54/57/55/88) et une recherche nationale filtrée aux offres en télétravail intégral (champ `contract.remote` fourni par l'API, plus fiable que la détection texte). Ne renvoie que des offres d'apprentissage/professionnalisation par construction
 - 🔎 **Scraping multi-sources** : HelloWork, Welcome to the Jungle, APEC, Indeed, Choose Your Boss — chaque plateforme est interrogée automatiquement pour **chaque mot-clé** configuré
 - 🔑 **Mots-clés paramétrables** : liste centrale (`MOTS_CLES_COMPLETS`) couvrant SecOps, Cloud Security Engineer, DevSecOps, DevOps, SRE, Ingénieur Cloud, etc.
 
@@ -80,12 +81,12 @@ Agent autonome qui automatise la recherche, le filtrage et l'évaluation techniq
 ### Pipeline de traitement (par groupe, en parallèle)
 
 ```
-┌─ MOTEUR 1 ──────────────────┐   ┌─ MOTEUR 2 ─────────────────────┐
-│ API France Travail (OAuth2) │   │ Scraping Playwright             │
-│ Recherches par mot-clé du   │   │ (HelloWork, WTTJ, APEC, Indeed, │
-│ groupe, dédupliquées        │   │ Choose Your Boss)               │
-└──────────────┬──────────────┘   └───────────────┬────────────────┘
-               └────────────┬─────────────────────┘
+┌─ MOTEUR 1 ─────────┐  ┌─ MOTEUR 2 ─────────────┐  ┌─ MOTEUR 3 ──────────────────────┐
+│ API France Travail │  │ API La Bonne Alternance│  │ Scraping Playwright              │
+│ (OAuth2), par      │  │ par code ROME du       │  │ (HelloWork, WTTJ, APEC, Indeed,  │
+│ mot-clé du groupe  │  │ groupe (local + remote)│  │ Choose Your Boss)                │
+└──────────┬──────────┘  └───────────┬────────────┘  └────────────────┬─────────────────┘
+           └──────────────────────────┬─────────────────────────────────┘
                             ▼
        Anti-doublons (mémoire 14 jours, URL + code postal normalisés)
                             ▼
@@ -122,6 +123,7 @@ Agent autonome qui automatise la recherche, le filtrage et l'évaluation techniq
 - Un compte [GroqCloud](https://console.groq.com) avec une clé API (gratuit)
 - Un compte [Mistral La Plateforme](https://console.mistral.ai) avec une clé API — plan **Experiment** (gratuit, sans carte bancaire, à sélectionner explicitement avant de générer la clé)
 - Un compte [francetravail.io](https://francetravail.io) avec une application souscrite à l'API **Offres d'emploi v2** (gratuit)
+- Un compte sur [api.apprentissage.beta.gouv.fr](https://api.apprentissage.beta.gouv.fr) avec une clé d'accès à l'API **La Bonne Alternance** (gratuit, usage non lucratif)
 - *(Optionnel)* Un webhook Discord pour les alertes
 - *(Optionnel)* Un compte Gmail avec un mot de passe d'application pour les notifications e-mail
 
@@ -144,6 +146,9 @@ playwright install chromium
 FT_CLIENT_ID=votre_client_id_ici
 FT_CLIENT_SECRET=votre_client_secret_ici
 
+# Clé d'accès API La Bonne Alternance (apprentissage.beta.gouv.fr)
+LBA_API_KEY=votre_cle_api_ici
+
 # Clés API des deux fournisseurs IA
 GROQ_API_KEY=votre_cle_groq_ici
 MISTRAL_API_KEY=votre_cle_mistral_ici
@@ -152,7 +157,7 @@ MISTRAL_API_KEY=votre_cle_mistral_ici
 WEBHOOK_DISCORD=votre_url_webhook_ici
 ```
 
-> 💡 Les valeurs sont nettoyées automatiquement (`.strip()`). Si les clés France Travail sont absentes, l'étape API est simplement ignorée et le scraping tourne quand même.
+> 💡 Les valeurs sont nettoyées automatiquement (`.strip()`). Si les clés France Travail ou La Bonne Alternance sont absentes, l'étape API correspondante est simplement ignorée et le reste du pipeline tourne quand même.
 
 ### Secrets GitHub Actions (pour le CI/CD)
 
@@ -161,6 +166,7 @@ Sur le repo GitHub → **Settings → Secrets and variables → Actions**, ajout
 | Secret | Usage |
 |---|---|
 | `FT_CLIENT_ID` / `FT_CLIENT_SECRET` | API France Travail |
+| `LBA_API_KEY` | API La Bonne Alternance |
 | `GROQ_API_KEY` | Étape 1 de l'analyse IA (Groq Cloud) |
 | `MISTRAL_API_KEY` | Étape 2 de l'analyse IA (Mistral La Plateforme) |
 | `WEBHOOK_DISCORD` | Alertes temps réel |
@@ -180,7 +186,7 @@ Sans `GROUPE_ID`/`MOTS_CLES_GROUPE`, le script traite l'intégralité de `MOTS_C
 
 Le workflow `.github/workflows/veille.yml` :
 1. Lance les 3 groupes (`secu`, `cloud-devops`, `infra-sre`) **en parallèle**, chacun avec son sous-ensemble de mots-clés
-2. Chaque groupe : interroge France Travail + scrape les 5 plateformes, filtre, analyse via Groq puis Mistral, associe le CV recommandé, met à jour son Excel et son historique
+2. Chaque groupe : interroge France Travail + La Bonne Alternance + scrape les 5 plateformes, filtre, analyse via Groq puis Mistral, associe le CV recommandé, met à jour son Excel et son historique
 3. Une fois les 3 groupes terminés (`needs: veille`, `if: always()`), le job `fusionner` télécharge leurs résultats et produit `suivi_candidatures_MASTER.xlsx`
 4. Un e-mail de fin de pipeline est envoyé avec le résumé et l'Excel Master en pièce jointe
 
@@ -192,6 +198,7 @@ Déclenchement : automatique tous les jours (`cron`), ou manuel via l'onglet **A
 |---|---|---|
 | Groupes et répartition des mots-clés | `matrix.include` dans `veille.yml` | 3 groupes (secu / cloud-devops / infra-sre) |
 | Liste complète des mots-clés | `MOTS_CLES_COMPLETS` | 13 intitulés (SecOps → Release Engineer) |
+| Codes ROME par groupe (La Bonne Alternance) | `ROME_PAR_GROUPE` | secu → M1802, cloud-devops → M1801, infra-sre → M1810 |
 | Zone géographique | `filtre_logistique()` / `code_postal_accepte()` | Nancy / 54 / Metz / Thionville / Sarrebourg / Bar-le-Duc / Épinal / télétravail intégral non ambigu |
 | Terme de contrat exigé | `filtre_type_contrat()` | alternance, apprentissage, contrat de pro |
 | CV recommandé par groupe | `CV_PAR_GROUPE` | liens vers `cv/CV_Deniz_OK_<groupe>[_ATS].pdf` |
@@ -209,6 +216,7 @@ Déclenchement : automatique tous les jours (`cron`), ou manuel via l'onglet **A
 |---|---|
 | **Python 3** | Langage principal |
 | **Requests + OAuth2** | API France Travail (token *client credentials*) |
+| **API La Bonne Alternance** | Agrégateur officiel d'offres d'apprentissage, par code ROME |
 | **Playwright** (Chromium headless) | Scraping des plateformes dynamiques |
 | **Groq Cloud** — `openai/gpt-oss-20b` | Analyse IA initiale (rapide, sortie JSON forcée) |
 | **Mistral La Plateforme** — `mistral-small-latest` | Relecture critique et correction (fournisseur indépendant) |

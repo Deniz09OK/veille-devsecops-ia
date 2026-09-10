@@ -14,9 +14,10 @@ from ..core.utils import valider_match_tech, comparer_scores
 # Schéma strict de la version finale (étape 2, Mistral) : force la présence de
 # toutes les clés attendues et le format "X/10" pour match_tech, plutôt que de
 # rattraper après coup une réponse mal formée (cf. valider_match_tech).
-# Non applicable à l'étape 1 (llama-3.1-8b-instant) : Groq ne supporte le
-# response_format json_schema strict que sur une liste restreinte de modèles
-# (llama-3.1-8b-instant n'en fait pas partie, vérifié en direct sur l'API).
+# Non appliqué à l'étape 1 (Groq, en mode "json_object" plus permissif) : pas
+# une contrainte technique avec le modèle actuel (openai/gpt-oss-20b supporte
+# aussi le json_schema strict côté Groq), mais on garde une étape 1 volontairement
+# souple pour laisser l'étape 2 (relecture Mistral) faire le travail de mise en forme.
 SCHEMA_ANALYSE_FINALE = {
     "type": "json_schema",
     "json_schema": {
