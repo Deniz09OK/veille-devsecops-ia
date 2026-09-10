@@ -5,7 +5,7 @@ from playwright.sync_api import sync_playwright
 
 from .core.config import GROUPE_ID, MOTS_CLES, MAX_ANALYSES_PAR_RUN, SEUIL_CANDIDATURE
 from .collecte.sources_scraping import SOURCES_RECHERCHE
-from .core.utils import normaliser_url_offre, normaliser_champ, extraire_note
+from .core.utils import normaliser_url_offre, normaliser_champ, extraire_note, normaliser_texte_dedup, offre_deja_analysee
 from .core.historique import charger_historique, ecrire_historique
 from .core.filtres import filtre_logistique, filtre_type_contrat, filtre_secteur_public, code_postal_accepte
 from .collecte.france_travail import generer_recherches_ft, recuperer_offres_france_travail
@@ -25,6 +25,13 @@ def executer():
     historique = charger_historique()
     offres_regroupees = {}
     compteur_analyses = 0
+    # Dédup AVANT appel IA (pas seulement à l'affichage) : une même offre postée
+    # sur plusieurs sources (ex: France Travail + La Bonne Alternance, qui
+    # resyndique souvent France Travail) ne doit payer qu'une seule analyse IA.
+    # Portée limitée à CE run (remise à zéro à chaque lancement), volontairement :
+    # voir offre_deja_analysee() dans core/utils.py pour la justification.
+    textes_deja_analyses = []
+    cles_par_texte = []
 
     # --- 1. TRAITEMENT API FRANCE TRAVAIL ---
     for offre in recuperer_offres_france_travail(generer_recherches_ft(MOTS_CLES)):
@@ -43,34 +50,43 @@ def executer():
             # d'apprentissage, et le texte libre de la description ne répète pas
             # toujours ce mot (offres légitimes rejetées à tort sinon).
             if (filtre_logistique(texte) or code_postal_accepte(code_postal)) and filtre_secteur_public(texte_filtre):
-                time.sleep(2)  # Respect du rate-limit Groq
-                analyse = analyser_technique_ia(texte, url)
+                idx_doublon = offre_deja_analysee(texte, textes_deja_analyses)
+                if idx_doublon is not None:
+                    # Déjà analysée ce run via une autre source : on rattache
+                    # juste ce lien, sans repayer une analyse IA.
+                    offres_regroupees[cles_par_texte[idx_doublon]]["liens"].append(url)
+                else:
+                    time.sleep(2)  # Respect du rate-limit Groq
+                    analyse = analyser_technique_ia(texte, url)
 
-                if analyse and "titre_poste" in analyse:
-                    compteur_analyses += 1
-                    # L'API France Travail fournit le nom de l'entreprise dans un
-                    # champ structuré et fiable : on l'utilise en priorité plutôt
-                    # que de laisser l'IA le deviner depuis le texte libre (où
-                    # elle peut halluciner, ex: confondre avec un nom mentionné
-                    # ailleurs dans l'offre).
-                    nom_entreprise_api = offre.get("entreprise", {}).get("nom", "").strip()
-                    if nom_entreprise_api:
-                        analyse["nom_entreprise"] = nom_entreprise_api
+                    if analyse and "titre_poste" in analyse:
+                        compteur_analyses += 1
+                        # L'API France Travail fournit le nom de l'entreprise dans un
+                        # champ structuré et fiable : on l'utilise en priorité plutôt
+                        # que de laisser l'IA le deviner depuis le texte libre (où
+                        # elle peut halluciner, ex: confondre avec un nom mentionné
+                        # ailleurs dans l'offre).
+                        nom_entreprise_api = offre.get("entreprise", {}).get("nom", "").strip()
+                        if nom_entreprise_api:
+                            analyse["nom_entreprise"] = nom_entreprise_api
 
-                    titre = normaliser_champ(analyse.get("titre_poste", "Poste Inconnu"))
-                    entreprise = normaliser_champ(analyse.get("nom_entreprise", "Non précisé"))
-                    cle = f"{titre} - {entreprise}"
-                    analyse["match_logistique"] = "10/10 (Validé par filtre Python)"
+                        titre = normaliser_champ(analyse.get("titre_poste", "Poste Inconnu"))
+                        entreprise = normaliser_champ(analyse.get("nom_entreprise", "Non précisé"))
+                        cle = f"{titre} - {entreprise}"
+                        analyse["match_logistique"] = "10/10 (Validé par filtre Python)"
 
-                    score_1 = extraire_note(analyse.get("match_tech"))
-                    if score_1 >= SEUIL_CANDIDATURE:
-                        analyse.update(generer_candidature_ia(analyse, texte))
+                        score_1 = extraire_note(analyse.get("match_tech"))
+                        if score_1 >= SEUIL_CANDIDATURE:
+                            analyse.update(generer_candidature_ia(analyse, texte))
 
-                    if cle in offres_regroupees:
-                        offres_regroupees[cle]["liens"].append(url)
-                    else:
-                        offres_regroupees[cle] = {"donnees_ia": analyse, "liens": [url]}
-                        envoyer_discord(cle, url, analyse.get("match_tech", "N/A"))
+                        if cle in offres_regroupees:
+                            offres_regroupees[cle]["liens"].append(url)
+                        else:
+                            offres_regroupees[cle] = {"donnees_ia": analyse, "liens": [url]}
+                            envoyer_discord(cle, url, analyse.get("match_tech", "N/A"))
+
+                        textes_deja_analyses.append(normaliser_texte_dedup(texte))
+                        cles_par_texte.append(cle)
 
             historique[url] = datetime.now().isoformat()
 
@@ -93,28 +109,35 @@ def executer():
             texte_verif = f"{texte_ia} {adresse} {nom_entreprise}"
 
             if filtre_logistique(texte_verif) and filtre_secteur_public(texte_verif):
-                time.sleep(2)  # Respect du rate-limit Groq
-                analyse = analyser_technique_ia(texte_ia, url)
+                idx_doublon = offre_deja_analysee(texte_ia, textes_deja_analyses)
+                if idx_doublon is not None:
+                    offres_regroupees[cles_par_texte[idx_doublon]]["liens"].append(url)
+                else:
+                    time.sleep(2)  # Respect du rate-limit Groq
+                    analyse = analyser_technique_ia(texte_ia, url)
 
-                if analyse and "titre_poste" in analyse:
-                    compteur_analyses += 1
-                    if nom_entreprise:
-                        analyse["nom_entreprise"] = nom_entreprise
+                    if analyse and "titre_poste" in analyse:
+                        compteur_analyses += 1
+                        if nom_entreprise:
+                            analyse["nom_entreprise"] = nom_entreprise
 
-                    titre = normaliser_champ(analyse.get("titre_poste", "Poste Inconnu"))
-                    entreprise = normaliser_champ(analyse.get("nom_entreprise", "Non précisé"))
-                    cle = f"{titre} - {entreprise}"
-                    analyse["match_logistique"] = "10/10 (Validé par filtre Python)"
+                        titre = normaliser_champ(analyse.get("titre_poste", "Poste Inconnu"))
+                        entreprise = normaliser_champ(analyse.get("nom_entreprise", "Non précisé"))
+                        cle = f"{titre} - {entreprise}"
+                        analyse["match_logistique"] = "10/10 (Validé par filtre Python)"
 
-                    score_1 = extraire_note(analyse.get("match_tech"))
-                    if score_1 >= SEUIL_CANDIDATURE:
-                        analyse.update(generer_candidature_ia(analyse, texte_ia))
+                        score_1 = extraire_note(analyse.get("match_tech"))
+                        if score_1 >= SEUIL_CANDIDATURE:
+                            analyse.update(generer_candidature_ia(analyse, texte_ia))
 
-                    if cle in offres_regroupees:
-                        offres_regroupees[cle]["liens"].append(url)
-                    else:
-                        offres_regroupees[cle] = {"donnees_ia": analyse, "liens": [url]}
-                        envoyer_discord(cle, url, analyse.get("match_tech", "N/A"))
+                        if cle in offres_regroupees:
+                            offres_regroupees[cle]["liens"].append(url)
+                        else:
+                            offres_regroupees[cle] = {"donnees_ia": analyse, "liens": [url]}
+                            envoyer_discord(cle, url, analyse.get("match_tech", "N/A"))
+
+                        textes_deja_analyses.append(normaliser_texte_dedup(texte_ia))
+                        cles_par_texte.append(cle)
 
             historique[url] = datetime.now().isoformat()
 
@@ -141,6 +164,11 @@ def executer():
                 historique[url] = datetime.now().isoformat()
 
                 if texte_brut and filtre_logistique(texte_brut) and filtre_type_contrat(texte_brut) and filtre_secteur_public(texte_brut):
+                    idx_doublon = offre_deja_analysee(texte_brut, textes_deja_analyses)
+                    if idx_doublon is not None:
+                        offres_regroupees[cles_par_texte[idx_doublon]]["liens"].append(url)
+                        continue
+
                     print(f"🧠 Analyse IA (Scraping) : {url.split('/')[-1][:30]}...")
                     time.sleep(2)  # Respect du rate-limit Groq
                     analyse = analyser_technique_ia(texte_brut, url)
@@ -161,6 +189,9 @@ def executer():
                         else:
                             offres_regroupees[cle] = {"donnees_ia": analyse, "liens": [url]}
                             envoyer_discord(cle, url, analyse.get("match_tech", "N/A"))
+
+                        textes_deja_analyses.append(normaliser_texte_dedup(texte_brut))
+                        cles_par_texte.append(cle)
 
         navigateur.close()
 
