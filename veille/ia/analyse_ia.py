@@ -5,6 +5,7 @@ import groq
 import requests
 
 from ..core.config import client_ia, MISTRAL_API_KEY, MODELE_IA, MODELE_IA_VALIDATION, PROFIL_CANDIDAT, collection_ia
+from ..core.feedback import charger_feedback
 from ..core.utils import valider_match_tech, comparer_scores
 
 # ==========================================
@@ -40,6 +41,36 @@ SCHEMA_ANALYSE_FINALE = {
 }
 
 
+def appliquer_feedback_reel():
+    """Reporte le retour réel des candidatures (feedback_candidatures.json,
+    rempli à la main par l'utilisateur) dans la mémoire RAG : pour chaque
+    offre déjà analysée dont on connaît maintenant le résultat réel, on
+    l'ajoute à ses métadonnées ChromaDB. La prochaine offre similaire en
+    tiendra compte à la calibration (cf. analyser_technique_ia), donnant à
+    l'IA un vrai signal de résultat plutôt que sa seule cohérence interne.
+    À appeler une fois par run, avant de traiter les offres."""
+    feedback = charger_feedback()
+    if not feedback:
+        return
+    for url, info in feedback.items():
+        # Valeur = {"statut": ..., "date": ...} ; "date" est indicative pour
+        # l'utilisateur et n'est pas exploitée par la calibration IA.
+        statut = info.get("statut") if isinstance(info, dict) else info
+        if not statut:
+            continue
+        try:
+            existants = collection_ia.get(ids=[url])
+            if not existants["ids"]:
+                continue  # offre inconnue de cette mémoire (jamais analysée dans ce groupe)
+            metadonnees = existants["metadatas"][0] or {}
+            if metadonnees.get("statut_reel") == statut:
+                continue  # déjà à jour
+            metadonnees["statut_reel"] = statut
+            collection_ia.update(ids=[url], metadatas=[metadonnees])
+        except Exception as e:
+            print(f"   ⚠️ Erreur application feedback pour {url} : {e}")
+
+
 def appeler_mistral(messages, response_format=None):
     """Appelle l'API Mistral (chat completions, format compatible OpenAI)
     en HTTP direct plutôt que via le SDK officiel."""
@@ -73,8 +104,21 @@ def analyser_technique_ia(texte_offre, url_offre):
             resultats = collection_ia.query(query_texts=[texte_offre[:3000]], n_results=1)
             contexte_memoire = ""
             if resultats['distances'] and len(resultats['distances'][0]) > 0 and resultats['distances'][0][0] < 1.0:
-                vieux_score = resultats['metadatas'][0][0].get('score', 'Inconnu')
-                contexte_memoire = f"\nRAPPEL: Tu as déjà évalué une offre similaire à {vieux_score}. Reste cohérent mais réanalyse CETTE offre depuis zéro."
+                meta_similaire = resultats['metadatas'][0][0]
+                vieux_score = meta_similaire.get('score', 'Inconnu')
+                statut_reel = meta_similaire.get('statut_reel')
+                contexte_memoire = f"\nRAPPEL: Tu as déjà évalué une offre similaire à {vieux_score}."
+                if statut_reel:
+                    # Résultat réel de candidature (feedback_candidatures.json), pas
+                    # juste une note IA passée : c'est le signal le plus fiable pour
+                    # recalibrer, à privilégier sur la seule cohérence interne.
+                    contexte_memoire += (
+                        f" Résultat réel de cette candidature : {statut_reel}. Si ce résultat "
+                        f"suggère que la note passée était mal calibrée (ex: note élevée mais "
+                        f"refus, ou note basse mais entretien obtenu), ajuste ton évaluation "
+                        f"en conséquence plutôt que de simplement reproduire l'ancienne note."
+                    )
+                contexte_memoire += " Reste cohérent mais réanalyse CETTE offre depuis zéro."
 
             # --- ÉTAPE 1 : première analyse (llama-3.1-8b-instant) ---
             prompt_initial = (
@@ -95,7 +139,7 @@ def analyser_technique_ia(texte_offre, url_offre):
             # --- ÉTAPE 2 : relecture critique et version finale (mistral-large-latest) ---
             prompt_relecture = (
                 f"Tu es un second expert qui relit l'analyse d'un collègue pour l'améliorer "
-                f"avant validation finale. Profil du candidat: {PROFIL_CANDIDAT}.\n\n"
+                f"avant validation finale. Profil du candidat: {PROFIL_CANDIDAT}. {contexte_memoire}\n\n"
                 f"Analyse initiale du collègue à relire :\n{json.dumps(analyse_initiale, ensure_ascii=False)}\n\n"
                 f"Texte de l'offre :\n{texte_offre[:4000]}\n\n"
                 f"Relis cette analyse de façon critique : corrige toute erreur (score mal "

@@ -7,9 +7,11 @@ __pycache__/
 *.pyc
 
 memoire_ia/
+memoire_ia_secu/
 historique_offres.json
 suivi_candidatures.xlsx
 Historique/
+debug_screenshots/
 *.log
 
 .DS_Store

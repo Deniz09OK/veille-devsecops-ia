@@ -83,6 +83,7 @@ jobs:
           path: |
             suivi_candidatures_${{ matrix.groupe_id }}.xlsx
             Historique
+            debug_screenshots
           retention-days: 30
           if-no-files-found: warn
 

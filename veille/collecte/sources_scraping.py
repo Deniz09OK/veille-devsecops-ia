@@ -19,35 +19,19 @@ SOURCES_TEMPLATES = [
         "domaine": "https://www.hellowork.com",
     },
     {
-        "nom": "Welcome to the Jungle - Nancy",
-        "url_template": "https://www.welcometothejungle.com/fr/jobs?query={mot}&location={loc}%2C+France&aroundQuery={loc}%2C+France&distance=10",
-        "aimant_css": 'a[href*="/jobs/"]',
-        "domaine": "https://www.welcometothejungle.com",
-    },
-    {
-        "nom": "Welcome to the Jungle - Full Remote",
-        "url_template": "https://www.welcometothejungle.com/fr/jobs?query={mot}&remote=all",
-        "aimant_css": 'a[href*="/jobs/"]',
-        "domaine": "https://www.welcometothejungle.com",
-    },
-    {
         "nom": "APEC",
         "url_template": "https://www.apec.fr/candidat/recherche-emploi.html/emploi?motsCles={mot}&typesContrat=172",
         "aimant_css": 'a[href*="/detail-offre/"]',
         "domaine": "https://www.apec.fr",
     },
-    {
-        "nom": "Indeed - Nancy",
-        "url_template": "https://fr.indeed.com/jobs?q={mot}+alternance&l={loc}",
-        "aimant_css": 'a[href*="/rc/clk"], a[href*="/viewjob"]',
-        "domaine": "https://fr.indeed.com",
-    },
-    {
-        "nom": "Indeed - Télétravail",
-        "url_template": "https://fr.indeed.com/jobs?q={mot}+alternance&l=T%C3%A9l%C3%A9travail",
-        "aimant_css": 'a[href*="/rc/clk"], a[href*="/viewjob"]',
-        "domaine": "https://fr.indeed.com",
-    },
+    # Retirées (voir historique Git pour les anciens templates) : Indeed
+    # (bloque systématiquement derrière une vérification Cloudflare, confirmé
+    # par capture d'écran) et Welcome to the Jungle (la recherche est
+    # désormais pilotée en JS côté client, l'URL ne reflète plus la requête —
+    # nécessiterait d'interagir avec la page plutôt qu'une simple URL).
+    # Choose Your Boss est gardée bien que son ancienne URL soit morte (404) :
+    # à investiguer plus tard, leur nouvelle page /offres/emploi-it semble
+    # organisée par entreprise plutôt que par offre individuelle.
     {
         "nom": "Choose Your Boss",
         "url_template": "https://www.chooseyourboss.com/offres-emploi/{mot}",

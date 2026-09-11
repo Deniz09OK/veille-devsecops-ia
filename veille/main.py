@@ -11,7 +11,7 @@ from .core.filtres import filtre_logistique, filtre_type_contrat, filtre_secteur
 from .collecte.france_travail import generer_recherches_ft, recuperer_offres_france_travail
 from .collecte.la_bonne_alternance import generer_recherches_lba, recuperer_offres_la_bonne_alternance
 from .collecte.scraping import extraire_liens, lire_texte_offre
-from .ia.analyse_ia import analyser_technique_ia, generer_candidature_ia
+from .ia.analyse_ia import analyser_technique_ia, appliquer_feedback_reel, generer_candidature_ia
 from .sortie.notifications import envoyer_discord
 from .sortie.rapport_excel import generer_rapport_markdown, generer_excel
 
@@ -22,6 +22,7 @@ def executer():
     # ==========================================
     print(f"🚀 Démarrage — Groupe : {GROUPE_ID}...")
 
+    appliquer_feedback_reel()
     historique = charger_historique()
     offres_regroupees = {}
     compteur_analyses = 0
