@@ -29,13 +29,15 @@ SOURCES_TEMPLATES = [
     # par capture d'écran) et Welcome to the Jungle (la recherche est
     # désormais pilotée en JS côté client, l'URL ne reflète plus la requête —
     # nécessiterait d'interagir avec la page plutôt qu'une simple URL).
-    # Choose Your Boss est gardée bien que son ancienne URL soit morte (404) :
-    # à investiguer plus tard, leur nouvelle page /offres/emploi-it semble
-    # organisée par entreprise plutôt que par offre individuelle.
     {
+        # Ancienne URL (/offres-emploi/{mot}) morte (404). La vraie page de
+        # résultats est /offres/emploi-it?tag=..., et les offres individuelles
+        # ne sont PAS sous /offres/ mais sous /candidates/offers/<slug>
+        # (confirmé en inspectant une vraie carte d'offre affichée) : l'ancien
+        # sélecteur ne matchait donc jamais rien depuis la refonte du site.
         "nom": "Choose Your Boss",
-        "url_template": "https://www.chooseyourboss.com/offres-emploi/{mot}",
-        "aimant_css": 'a[href*="/offers/"], a[href*="/offres/"]',
+        "url_template": "https://www.chooseyourboss.com/offres/emploi-it?tag={mot}",
+        "aimant_css": 'a[href*="/candidates/offers/"]',
         "domaine": "https://www.chooseyourboss.com",
     },
 ]
@@ -46,11 +48,7 @@ def generer_sources_scraping(mots_cles, localisation):
     sources_finales = []
     for template in SOURCES_TEMPLATES:
         for mot in mots_cles:
-            if template["nom"] == "Choose Your Boss":
-                slug = mot.lower().replace(" ", "-").replace("(", "").replace(")", "")
-                mot_pour_url = urllib.parse.quote(slug)
-            else:
-                mot_pour_url = urllib.parse.quote_plus(mot)
+            mot_pour_url = urllib.parse.quote_plus(mot)
             sources_finales.append({
                 "nom": f"{template['nom']} - {mot}",
                 "url": template["url_template"].format(mot=mot_pour_url, loc=loc_encodee),
