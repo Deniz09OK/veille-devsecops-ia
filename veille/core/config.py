@@ -34,9 +34,9 @@ CV_PAR_GROUPE = {
 }
 FICHIER_HISTORIQUE = f"historique_offres_{GROUPE_ID}.json" if GROUPE_ID != "default" else "historique_offres.json"
 JOURS_MEMOIRE = 14
-MAX_ANALYSES_PAR_RUN = 15  
-MODELE_IA = "openai/gpt-oss-120b"  # Groq — modele plus gros que gpt-oss-20b (raisonnement plus fin pour l'etape 1), memes limites de debit sur le plan Developer
-MODELE_IA_VALIDATION = "mistral-small-latest"  # Mistral — mistral-large-latest n'est pas inclus dans le plan gratuit Experiment (erreur API "tier_not_allowed")
+MAX_ANALYSES_PAR_RUN = 15
+MODELE_IA = "openai/gpt-oss-120b"
+MODELE_IA_VALIDATION = "mistral-small-latest"
 SEUIL_CANDIDATURE = 8.0
 
 PROFIL_CANDIDAT = """
@@ -46,13 +46,11 @@ PROFIL_CANDIDAT = """
 - Dev/Design : Vite, Figma, Tailwind CSS.
 """.strip()
 
-# Initialisation dossiers
 nom_dossier_jour = datetime.now().strftime("%Y%m%d")
 chemin_archivage = os.path.join("Historique", nom_dossier_jour, GROUPE_ID) if GROUPE_ID != "default" else os.path.join("Historique", nom_dossier_jour)
 os.makedirs(chemin_archivage, exist_ok=True)
 FICHIER_RAPPORT = os.path.join(chemin_archivage, "rapport_alternances.md")
 
-# Initialisation ChromaDB
 chemin_memoire_ia = f"./memoire_ia_{GROUPE_ID}" if GROUPE_ID != "default" else "./memoire_ia"
 client_chroma = chromadb.PersistentClient(path=chemin_memoire_ia)
 collection_ia = client_chroma.get_or_create_collection(name="memoire_devsecops_v2")

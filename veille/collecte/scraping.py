@@ -3,15 +3,7 @@ import re
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
-# ==========================================
-# MOTEUR 2 : SCRAPING PLAYWRIGHT
-# ==========================================
-
 DOSSIER_DEBUG = "debug_screenshots"
-# Diagnostic des timeouts (bandeau cookies, page de vérification anti-bot,
-# sélecteur réellement obsolète ?) : une seule capture par domaine et par run,
-# pas une par mot-clé, pour ne pas se retrouver avec des dizaines de captures
-# quasi identiques d'un même blocage.
 _domaines_captures_ce_run = set()
 
 
@@ -28,23 +20,14 @@ def _capturer_debug(page, config):
         print(f"   ⚠️ Capture debug impossible pour {domaine} : {e}")
 
 
-# Mots-clés observés sur de vraies pages de blocage lors de l'audit
-# Indeed/Choose Your Boss (cf. historique Git) : une page bloquée garde
-# souvent une nav/un footer complets (donc beaucoup de texte, la seule
-# longueur ne suffit pas à la distinguer d'un vrai "0 résultat").
 _SIGNAUX_BLOCAGE = [
     "cloudflare", "ray id", "captcha", "vérification supplémentaire",
     "access denied", "403 forbidden", "are you a robot", "détection de robot",
-    "trap!",  # page 404 personnalisée de Choose Your Boss, ex: "#404 ... It's a trap!"
+    "trap!",
 ]
 
 
 def _page_chargee_normalement(page):
-    """Distingue un vrai blocage/erreur (Cloudflare, 404, page vide) d'une
-    recherche simplement vide : une page de résultats, même à 0 offre, garde
-    sa nav/son footer/ses filtres (texte substantiel et sans signal de
-    blocage), alors qu'une page bloquée/cassée est soit très courte, soit
-    contient un des signaux ci-dessus."""
     try:
         texte = page.locator("body").inner_text(timeout=3000).lower()
     except Exception:

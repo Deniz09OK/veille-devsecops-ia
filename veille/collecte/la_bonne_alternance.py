@@ -8,10 +8,6 @@ DEPARTEMENTS_ACCEPTES = ["54", "57", "55", "88"]
 
 
 def generer_recherches_lba():
-    """Deux recherches par groupe : les offres locales (filtrées par
-    département côté API) et les offres nationales, dont seules celles en
-    télétravail intégral seront gardées (filtrage côté Python, l'API n'a pas
-    de paramètre "remote uniquement")."""
     romes = ROME_PAR_GROUPE.get(GROUPE_ID, ROME_PAR_DEFAUT)
     if not romes:
         return []
@@ -35,9 +31,6 @@ def recuperer_offres_la_bonne_alternance(recherches):
                 print(f"   ⚠️ La Bonne Alternance ({nom_recherche}) : HTTP {reponse.status_code}")
                 continue
             for offre in reponse.json().get("jobs", []):
-                # La recherche "nationale" n'a pas de filtre géographique côté
-                # API : on écarte ici tout ce qui n'est ni dans nos départements
-                # (déjà couvert par la recherche "locale") ni en full remote.
                 if nom_recherche == "nationale" and (offre.get("contract") or {}).get("remote") != "remote":
                     continue
                 identifiant = (offre.get("identifier") or {}).get("id") or (offre.get("apply") or {}).get("url")

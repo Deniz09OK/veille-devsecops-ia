@@ -113,13 +113,34 @@ jobs:
           python - <<'EOF'
           import glob
           import pandas as pd
+          from openpyxl.formatting.rule import FormulaRule
+          from openpyxl.styles import PatternFill
+          from openpyxl.utils import get_column_letter
+
+          # Doit rester synchronisé avec SEUIL_CANDIDATURE (core/config.py) et
+          # _colorer_score_technique (sortie/rapport_excel.py) : ce script tourne
+          # dans un job séparé sans checkout du repo, donc pas d'import possible.
+          SEUIL_CANDIDATURE = 8.0
+
           fichiers = glob.glob("resultats-bruts/**/suivi_candidatures_*.xlsx", recursive=True)
           if fichiers:
               dfs = [pd.read_excel(f, engine="openpyxl") for f in fichiers]
               df_final = pd.concat(dfs, ignore_index=True)
               if "Lien de l'offre" in df_final.columns:
                   df_final = df_final.drop_duplicates(subset=["Lien de l'offre"])
-              df_final.to_excel("suivi_candidatures_MASTER.xlsx", index=False, engine="openpyxl")
+              with pd.ExcelWriter("suivi_candidatures_MASTER.xlsx", engine="openpyxl") as writer:
+                  df_final.to_excel(writer, index=False, sheet_name="Suivi")
+                  if not df_final.empty and "Score Technique" in df_final.columns:
+                      feuille = writer.sheets["Suivi"]
+                      colonne = get_column_letter(df_final.columns.get_loc("Score Technique") + 1)
+                      plage = f"{colonne}2:{colonne}{len(df_final) + 1}"
+                      valeur = f'VALUE(LEFT({colonne}2,FIND("/",{colonne}2)-1))'
+                      vert = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+                      orange = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
+                      rouge = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+                      feuille.conditional_formatting.add(plage, FormulaRule(formula=[f"{valeur}>={SEUIL_CANDIDATURE}"], fill=vert, stopIfTrue=True))
+                      feuille.conditional_formatting.add(plage, FormulaRule(formula=[f"AND({valeur}>=5,{valeur}<{SEUIL_CANDIDATURE})"], fill=orange, stopIfTrue=True))
+                      feuille.conditional_formatting.add(plage, FormulaRule(formula=[f"{valeur}<5"], fill=rouge, stopIfTrue=True))
               print(f"✅ Fusion terminée : {len(df_final)} offre(s) au total.")
           EOF
 

@@ -8,18 +8,6 @@ from ..core.config import client_ia, MISTRAL_API_KEY, MODELE_IA, MODELE_IA_VALID
 from ..core.feedback import charger_feedback
 from ..core.utils import valider_match_tech, comparer_scores
 
-# ==========================================
-# ANALYSE IA (Groq + Mistral, avec mémoire RAG ChromaDB)
-# ==========================================
-
-# Schéma strict de la version finale (étape 2, Mistral) : force la présence de
-# toutes les clés attendues et le format "X/10" pour match_tech, plutôt que de
-# rattraper après coup une réponse mal formée (cf. valider_match_tech).
-# Non appliqué à l'étape 1 (Groq, en mode "json_object" plus permissif) : pas
-# une contrainte technique avec les modèles gpt-oss de Groq (openai/gpt-oss-20b
-# ET openai/gpt-oss-120b supportent aussi le json_schema strict), mais on garde
-# une étape 1 volontairement
-# souple pour laisser l'étape 2 (relecture Mistral) faire le travail de mise en forme.
 SCHEMA_ANALYSE_FINALE = {
     "type": "json_schema",
     "json_schema": {
@@ -43,29 +31,20 @@ SCHEMA_ANALYSE_FINALE = {
 
 
 def appliquer_feedback_reel():
-    """Reporte le retour réel des candidatures (feedback_candidatures.json,
-    rempli à la main par l'utilisateur) dans la mémoire RAG : pour chaque
-    offre déjà analysée dont on connaît maintenant le résultat réel, on
-    l'ajoute à ses métadonnées ChromaDB. La prochaine offre similaire en
-    tiendra compte à la calibration (cf. analyser_technique_ia), donnant à
-    l'IA un vrai signal de résultat plutôt que sa seule cohérence interne.
-    À appeler une fois par run, avant de traiter les offres."""
     feedback = charger_feedback()
     if not feedback:
         return
     for url, info in feedback.items():
-        # Valeur = {"statut": ..., "date": ...} ; "date" est indicative pour
-        # l'utilisateur et n'est pas exploitée par la calibration IA.
         statut = info.get("statut") if isinstance(info, dict) else info
         if not statut:
             continue
         try:
             existants = collection_ia.get(ids=[url])
             if not existants["ids"]:
-                continue  # offre inconnue de cette mémoire (jamais analysée dans ce groupe)
+                continue
             metadonnees = existants["metadatas"][0] or {}
             if metadonnees.get("statut_reel") == statut:
-                continue  # déjà à jour
+                continue
             metadonnees["statut_reel"] = statut
             collection_ia.update(ids=[url], metadatas=[metadonnees])
         except Exception as e:
@@ -73,8 +52,6 @@ def appliquer_feedback_reel():
 
 
 def appeler_mistral(messages, response_format=None):
-    """Appelle l'API Mistral (chat completions, format compatible OpenAI)
-    en HTTP direct plutôt que via le SDK officiel."""
     reponse = requests.post(
         "https://api.mistral.ai/v1/chat/completions",
         headers={"Authorization": f"Bearer {MISTRAL_API_KEY}", "Content-Type": "application/json"},
@@ -91,14 +68,6 @@ def appeler_mistral(messages, response_format=None):
 
 
 def analyser_technique_ia(texte_offre, url_offre):
-    """Analyse collaborative à deux modèles :
-    1. llama-3.1-8b-instant (Groq) produit une première analyse (rapide, bon rapport qualité/vitesse).
-    2. mistral-large-latest (API Mistral) relit cette analyse de façon critique, corrige les erreurs
-       (score mal calibré, entreprise mal identifiée, compétence oubliée) et produit
-       la version FINALE. Ce n'est pas une simple double-vérification après coup :
-       le second modèle voit le travail du premier et l'améliore directement.
-    Le score initial de llama est conservé à part (traçabilité), mais c'est la
-    version de mistral qui fait foi partout ailleurs (Excel, Discord, seuils)."""
     max_retries = 3
     for attempt in range(max_retries):
         try:
@@ -110,9 +79,6 @@ def analyser_technique_ia(texte_offre, url_offre):
                 statut_reel = meta_similaire.get('statut_reel')
                 contexte_memoire = f"\nRAPPEL: Tu as déjà évalué une offre similaire à {vieux_score}."
                 if statut_reel:
-                    # Résultat réel de candidature (feedback_candidatures.json), pas
-                    # juste une note IA passée : c'est le signal le plus fiable pour
-                    # recalibrer, à privilégier sur la seule cohérence interne.
                     contexte_memoire += (
                         f" Résultat réel de cette candidature : {statut_reel}. Si ce résultat "
                         f"suggère que la note passée était mal calibrée (ex: note élevée mais "
@@ -121,7 +87,6 @@ def analyser_technique_ia(texte_offre, url_offre):
                     )
                 contexte_memoire += " Reste cohérent mais réanalyse CETTE offre depuis zéro."
 
-            # --- ÉTAPE 1 : première analyse (llama-3.1-8b-instant) ---
             prompt_initial = (
                 f"Analyse cette offre pour un MSc Cybersécurité & Cloud (Epitech). "
                 f"Profil: {PROFIL_CANDIDAT}. {contexte_memoire}. "
@@ -137,7 +102,6 @@ def analyser_technique_ia(texte_offre, url_offre):
             analyse_initiale["match_tech"] = valider_match_tech(analyse_initiale.get("match_tech", "5/10"))
             score_initial = analyse_initiale["match_tech"]
 
-            # --- ÉTAPE 2 : relecture critique et version finale (mistral-large-latest) ---
             prompt_relecture = (
                 f"Tu es un second expert qui relit l'analyse d'un collègue pour l'améliorer "
                 f"avant validation finale. Profil du candidat: {PROFIL_CANDIDAT}. {contexte_memoire}\n\n"
@@ -155,7 +119,6 @@ def analyser_technique_ia(texte_offre, url_offre):
             analyse_finale = json.loads(contenu_reponse_2)
             analyse_finale["match_tech"] = valider_match_tech(analyse_finale.get("match_tech", score_initial))
 
-            # Traçabilité : on garde le score initial et un résumé de l'ajustement
             analyse_finale["score_initial"] = score_initial
             analyse_finale["ajustement_collaboratif"] = comparer_scores(score_initial, analyse_finale["match_tech"])
 

@@ -2,9 +2,6 @@ import urllib.parse
 
 from ..core.config import MOTS_CLES, LOCALISATION
 
-# ==========================================
-# TEMPLATES DE SOURCES (Scraping)
-# ==========================================
 SOURCES_TEMPLATES = [
     {
         "nom": "HelloWork - Nancy & Alentours",
@@ -24,16 +21,6 @@ SOURCES_TEMPLATES = [
         "aimant_css": 'a[href*="/detail-offre/"]',
         "domaine": "https://www.apec.fr",
     },
-    # Retirées (voir historique Git pour les anciens templates) : Indeed
-    # (bloque systématiquement derrière une vérification Cloudflare, confirmé
-    # par capture d'écran) et Welcome to the Jungle (la recherche est
-    # désormais pilotée en JS côté client, l'URL ne reflète plus la requête —
-    # nécessiterait d'interagir avec la page plutôt qu'une simple URL).
-    # Choose Your Boss retirée aussi : l'URL a été corrigée (l'ancienne
-    # /offres-emploi/{mot} était une 404 depuis leur refonte), mais le site est
-    # protégé par Cloudflare et bloque la session dès la 2e requête rapprochée
-    # — persistant même avec 10s de pause entre les requêtes. Au mieux 1 seule
-    # recherche aboutirait par run, pour un coût de maintenance disproportionné.
 ]
 
 

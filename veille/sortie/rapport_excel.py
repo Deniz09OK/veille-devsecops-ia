@@ -1,13 +1,15 @@
 import os
 from datetime import datetime
 import pandas as pd
+from openpyxl.formatting.rule import FormulaRule
+from openpyxl.styles import PatternFill
+from openpyxl.utils import get_column_letter
 
-from ..core.config import FICHIER_RAPPORT, FICHIER_EXCEL, GROUPE_ID, CV_PAR_GROUPE, MODELE_IA, MODELE_IA_VALIDATION
+from ..core.config import FICHIER_RAPPORT, FICHIER_EXCEL, GROUPE_ID, CV_PAR_GROUPE, MODELE_IA, MODELE_IA_VALIDATION, SEUIL_CANDIDATURE
 from ..core.utils import normaliser_champ
 
 
 def generer_rapport_markdown(offres_triees):
-    """Écrit le rapport Markdown quotidien (archivé dans Historique/AAAAMMJJ/<groupe>/)."""
     print("\n📝 Rédaction du rapport structuré...")
 
     with open(FICHIER_RAPPORT, "w", encoding="utf-8") as f_rapport:
@@ -29,9 +31,23 @@ def generer_rapport_markdown(offres_triees):
                 f_rapport.write("\n---\n\n")
 
 
+def _colorer_score_technique(feuille, df):
+    if df.empty or "Score Technique" not in df.columns:
+        return
+    colonne = get_column_letter(df.columns.get_loc("Score Technique") + 1)
+    plage = f"{colonne}2:{colonne}{len(df) + 1}"
+    valeur = f'VALUE(LEFT({colonne}2,FIND("/",{colonne}2)-1))'
+
+    vert = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+    orange = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
+    rouge = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+
+    feuille.conditional_formatting.add(plage, FormulaRule(formula=[f"{valeur}>={SEUIL_CANDIDATURE}"], fill=vert, stopIfTrue=True))
+    feuille.conditional_formatting.add(plage, FormulaRule(formula=[f"AND({valeur}>=5,{valeur}<{SEUIL_CANDIDATURE})"], fill=orange, stopIfTrue=True))
+    feuille.conditional_formatting.add(plage, FormulaRule(formula=[f"{valeur}<5"], fill=rouge, stopIfTrue=True))
+
+
 def generer_excel(offres_triees):
-    """Met à jour le tableau de bord Excel du groupe (fusion avec les lignes
-    déjà présentes, dédupliqué par lien d'offre)."""
     print("📊 Mise à jour du fichier Excel...")
 
     donnees_excel = []
@@ -68,7 +84,9 @@ def generer_excel(offres_triees):
                 df_final = df_nouveau
         else:
             df_final = df_nouveau
-        df_final.to_excel(FICHIER_EXCEL, index=False, engine='openpyxl')
+        with pd.ExcelWriter(FICHIER_EXCEL, engine="openpyxl") as writer:
+            df_final.to_excel(writer, index=False, sheet_name="Suivi")
+            _colorer_score_technique(writer.sheets["Suivi"], df_final)
         print(f"✅ Excel mis à jour : {len(donnees_excel)} nouvelle(s) offre(s) traitée(s).")
     else:
         print("⚠️ Aucune nouvelle donnée à traiter pour l'Excel aujourd'hui.")

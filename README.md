@@ -45,6 +45,7 @@ Agent autonome qui automatise la recherche, le filtrage et l'évaluation techniq
 
 ### Sorties & notifications
 - 📊 **Tableau de bord Excel** par groupe + Master fusionné : entreprise, poste, score final, score initial, ajustement collaboratif, verdict, CV recommandés, message LinkedIn, lettre de motivation, colonnes **Statut**/**Notes perso** libres
+- 🎨 **Mise en forme conditionnelle** sur le score final : vert (≥ seuil de candidature), orange (5 à ce seuil), rouge (< 5) — repérer les offres intéressantes d'un coup d'œil sans lire chaque ligne
 - 📁 **Rapports Markdown quotidiens**, archivés par jour et par groupe
 - 🔔 **Alertes Discord en temps réel** dès qu'une offre passe tous les filtres
 - 📧 **E-mail de fin de pipeline** (Gmail SMTP) : résumé chiffré (nombre d'offres, meilleure offre du jour), lien vers le run, Excel Master en pièce jointe — envoyé que le run réussisse ou échoue

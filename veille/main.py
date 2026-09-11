@@ -17,24 +17,15 @@ from .sortie.rapport_excel import generer_rapport_markdown, generer_excel
 
 
 def executer():
-    # ==========================================
-    # CŒUR DU PROGRAMME
-    # ==========================================
     print(f"🚀 Démarrage — Groupe : {GROUPE_ID}...")
 
     appliquer_feedback_reel()
     historique = charger_historique()
     offres_regroupees = {}
     compteur_analyses = 0
-    # Dédup AVANT appel IA (pas seulement à l'affichage) : une même offre postée
-    # sur plusieurs sources (ex: France Travail + La Bonne Alternance, qui
-    # resyndique souvent France Travail) ne doit payer qu'une seule analyse IA.
-    # Portée limitée à CE run (remise à zéro à chaque lancement), volontairement :
-    # voir offre_deja_analysee() dans core/utils.py pour la justification.
     textes_deja_analyses = []
     cles_par_texte = []
 
-    # --- 1. TRAITEMENT API FRANCE TRAVAIL ---
     for offre in recuperer_offres_france_travail(generer_recherches_ft(MOTS_CLES)):
         if compteur_analyses >= MAX_ANALYSES_PAR_RUN:
             print(f"🛑 Quota de {MAX_ANALYSES_PAR_RUN} analyses atteint, arrêt anticipé (France Travail).")
@@ -46,27 +37,16 @@ def executer():
             texte_filtre = f"{texte} {offre.get('entreprise', {}).get('nom', '')}"
 
             code_postal = str(offre.get("lieuTravail", {}).get("codePostal", ""))
-            # filtre_type_contrat n'est pas réappliqué ici : natureContrat=E2 dans
-            # generer_recherches_ft() garantit déjà qu'il s'agit d'un contrat
-            # d'apprentissage, et le texte libre de la description ne répète pas
-            # toujours ce mot (offres légitimes rejetées à tort sinon).
             if (filtre_logistique(texte) or code_postal_accepte(code_postal)) and filtre_secteur_public(texte_filtre):
                 idx_doublon = offre_deja_analysee(texte, textes_deja_analyses)
                 if idx_doublon is not None:
-                    # Déjà analysée ce run via une autre source : on rattache
-                    # juste ce lien, sans repayer une analyse IA.
                     offres_regroupees[cles_par_texte[idx_doublon]]["liens"].append(url)
                 else:
-                    time.sleep(2)  # Respect du rate-limit Groq
+                    time.sleep(2)
                     analyse = analyser_technique_ia(texte, url)
 
                     if analyse and "titre_poste" in analyse:
                         compteur_analyses += 1
-                        # L'API France Travail fournit le nom de l'entreprise dans un
-                        # champ structuré et fiable : on l'utilise en priorité plutôt
-                        # que de laisser l'IA le deviner depuis le texte libre (où
-                        # elle peut halluciner, ex: confondre avec un nom mentionné
-                        # ailleurs dans l'offre).
                         nom_entreprise_api = offre.get("entreprise", {}).get("nom", "").strip()
                         if nom_entreprise_api:
                             analyse["nom_entreprise"] = nom_entreprise_api
@@ -91,7 +71,6 @@ def executer():
 
             historique[url] = datetime.now().isoformat()
 
-    # --- 2. TRAITEMENT API LA BONNE ALTERNANCE ---
     for offre in recuperer_offres_la_bonne_alternance(generer_recherches_lba()):
         if compteur_analyses >= MAX_ANALYSES_PAR_RUN:
             print(f"🛑 Quota de {MAX_ANALYSES_PAR_RUN} analyses atteint, arrêt anticipé (La Bonne Alternance).")
@@ -104,9 +83,6 @@ def executer():
             nom_entreprise = (workplace.get("name") or workplace.get("legal_name") or workplace.get("brand") or "").strip()
             adresse = (workplace.get("location") or {}).get("address", "")
             texte_ia = f"{offer_data.get('title', '')}. {offer_data.get('description', '')} Compétences : {', '.join(offer_data.get('desired_skills') or [])}"
-            # filtre_logistique() est réutilisé ici pour la zone géographique
-            # (via l'adresse) ET la liste noire des écoles concurrentes ; on
-            # lui passe donc un texte élargi, pas le texte destiné à l'IA.
             texte_verif = f"{texte_ia} {adresse} {nom_entreprise}"
 
             if filtre_logistique(texte_verif) and filtre_secteur_public(texte_verif):
@@ -114,7 +90,7 @@ def executer():
                 if idx_doublon is not None:
                     offres_regroupees[cles_par_texte[idx_doublon]]["liens"].append(url)
                 else:
-                    time.sleep(2)  # Respect du rate-limit Groq
+                    time.sleep(2)
                     analyse = analyser_technique_ia(texte_ia, url)
 
                     if analyse and "titre_poste" in analyse:
@@ -142,7 +118,6 @@ def executer():
 
             historique[url] = datetime.now().isoformat()
 
-    # --- 3. TRAITEMENT PLAYWRIGHT (Scraping) ---
     with sync_playwright() as p:
         navigateur = p.chromium.launch(headless=True)
         contexte = navigateur.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0")
@@ -171,7 +146,7 @@ def executer():
                         continue
 
                     print(f"🧠 Analyse IA (Scraping) : {url.split('/')[-1][:30]}...")
-                    time.sleep(2)  # Respect du rate-limit Groq
+                    time.sleep(2)
                     analyse = analyser_technique_ia(texte_brut, url)
 
                     if analyse and "titre_poste" in analyse:

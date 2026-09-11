@@ -2,10 +2,6 @@ import requests
 
 from ..core.config import WEBHOOK_DISCORD
 
-# ==========================================
-# NOTIFICATIONS DISCORD
-# ==========================================
-
 
 def envoyer_discord(titre, lien, match_tech):
     if not WEBHOOK_DISCORD or WEBHOOK_DISCORD == "VOTRE_WEBHOOK_ICI":

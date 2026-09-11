@@ -3,10 +3,6 @@ import requests
 
 from ..core.config import FT_CLIENT_ID, FT_CLIENT_SECRET
 
-# ==========================================
-# MOTEUR 1 : API FRANCE TRAVAIL
-# ==========================================
-
 
 def obtenir_token_france_travail():
     url_token = "https://entreprise.francetravail.fr/connexion/oauth2/access_token?realm=%2Fpartenaire"
