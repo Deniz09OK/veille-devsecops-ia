@@ -35,7 +35,7 @@ CV_PAR_GROUPE = {
 FICHIER_HISTORIQUE = f"historique_offres_{GROUPE_ID}.json" if GROUPE_ID != "default" else "historique_offres.json"
 JOURS_MEMOIRE = 14
 MAX_ANALYSES_PAR_RUN = 15  
-MODELE_IA = "openai/gpt-oss-20b"  # 
+MODELE_IA = "openai/gpt-oss-120b"  # Groq — modele plus gros que gpt-oss-20b (raisonnement plus fin pour l'etape 1), memes limites de debit sur le plan Developer
 MODELE_IA_VALIDATION = "mistral-small-latest"  # Mistral — mistral-large-latest n'est pas inclus dans le plan gratuit Experiment (erreur API "tier_not_allowed")
 SEUIL_CANDIDATURE = 8.0
 

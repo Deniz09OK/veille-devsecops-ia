@@ -11,7 +11,7 @@ Agent autonome qui automatise la recherche, le filtrage et l'évaluation techniq
 ### Recherche & collecte
 - 🌍 **API France Travail (Offres d'emploi v2)** : OAuth2 *client credentials*, recherches ciblées Nancy 30 km + France entière par mot-clé, filtrées `natureContrat=E2` (alternance)
 - 🎓 **API La Bonne Alternance** (`api.apprentissage.beta.gouv.fr`) : agrégateur officiel de l'État dédié à l'alternance (France Travail + CFA + entreprises), interrogé par **code ROME** plutôt que mot-clé — une recherche locale (départements 54/57/55/88) et une recherche nationale filtrée aux offres en télétravail intégral (champ `contract.remote` fourni par l'API, plus fiable que la détection texte). Ne renvoie que des offres d'apprentissage/professionnalisation par construction
-- 🔎 **Scraping multi-sources** : HelloWork, APEC, Choose Your Boss — chaque plateforme est interrogée automatiquement pour **chaque mot-clé** configuré. Indeed et Welcome to the Jungle ont été retirés (blocage Cloudflare systématique / recherche désormais pilotée en JS côté client, non réparables simplement — voir historique Git). Choose Your Boss est également protégée par Cloudflare mais tolère 1 requête avant de bloquer la session : au mieux la 1ère recherche par run aboutit pour cette source
+- 🔎 **Scraping multi-sources** : HelloWork, APEC — chaque plateforme est interrogée automatiquement pour **chaque mot-clé** configuré. Indeed, Welcome to the Jungle et Choose Your Boss ont été retirés : les trois sont protégées par Cloudflare (blocage systématique pour les deux premiers ; blocage de session dès la 2e requête rapprochée, persistant même avec 10s de pause, pour le troisième) — voir historique Git pour le détail de chaque investigation
 - 🩺 **Diagnostic automatique des blocages de scraping** : capture d'écran (une par domaine et par run) en cas d'échec réellement anormal, uploadée en artefact CI (`debug_screenshots/`) — un simple "0 résultat" pour une recherche pointue n'est plus confondu avec un vrai blocage/site cassé
 - 🔑 **Mots-clés paramétrables** : liste centrale (`MOTS_CLES_COMPLETS`) couvrant SecOps, Cloud Security Engineer, DevSecOps, DevOps, SRE, Ingénieur Cloud, etc.
 
@@ -27,7 +27,7 @@ Agent autonome qui automatise la recherche, le filtrage et l'évaluation techniq
 - 🔁 **Anti-doublons intra-run, avant l'appel IA** : une même offre postée sur plusieurs sources (ex: France Travail + La Bonne Alternance, qui resyndique souvent France Travail) est détectée par similarité de texte (`difflib`) et ne consomme qu'**une seule** analyse IA — le lien supplémentaire est simplement rattaché à l'entrée existante
 
 ### Analyse IA collaborative (Groq + Mistral)
-- 🧠 **Étape 1 — dégrossissage rapide** (Groq, `openai/gpt-oss-20b`) : note technique `/10`, points forts, technos à découvrir, verdict, titre et entreprise
+- 🧠 **Étape 1 — dégrossissage rapide** (Groq, `openai/gpt-oss-120b`) : note technique `/10`, points forts, technos à découvrir, verdict, titre et entreprise
 - 🔬 **Étape 2 — relecture critique** (Mistral, `mistral-small-latest`) : un second modèle, **d'un fournisseur différent**, relit l'analyse complète du premier et produit la version **finale**. Le score initial et un résumé de l'ajustement (`✅ Confirmé` / `🔧 Ajusté`) sont conservés pour traçabilité
 - 🗃️ **Mémoire vectorielle RAG (ChromaDB)**, une base par groupe : chaque offre est vectorisée et comparée aux évaluations passées, injectée en **référence de calibration uniquement** (jamais recopiée telle quelle)
 - 🔄 **Boucle de feedback réel** (`feedback_candidatures.json`, versionné dans Git) : l'utilisateur y enregistre le résultat réel d'une candidature (`entretien` / `refus` / `sans_reponse` + date), reporté dans les métadonnées ChromaDB au début de chaque run. La calibration RAG (étapes 1 **et** 2) en tient compte pour recalibrer sur des résultats réels plutôt que sur la seule cohérence de l'IA avec elle-même
@@ -97,8 +97,8 @@ Agent autonome qui automatise la recherche, le filtrage et l'évaluation techniq
                             ▼
 ┌─ MOTEUR 1 ─────────┐  ┌─ MOTEUR 2 ─────────────┐  ┌─ MOTEUR 3 ──────────────────────┐
 │ API France Travail │  │ API La Bonne Alternance│  │ Scraping Playwright              │
-│ (OAuth2), par      │  │ par code ROME du       │  │ (HelloWork, APEC,                │
-│ mot-clé du groupe  │  │ groupe (local + remote)│  │ Choose Your Boss)                │
+│ (OAuth2), par      │  │ par code ROME du       │  │ (HelloWork, APEC)                │
+│ mot-clé du groupe  │  │ groupe (local + remote)│  │                                   │
 └──────────┬──────────┘  └───────────┬────────────┘  └────────────────┬─────────────────┘
            └──────────────────────────┬─────────────────────────────────┘
                             ▼
@@ -114,7 +114,7 @@ Agent autonome qui automatise la recherche, le filtrage et l'évaluation techniq
      → injection en RÉFÉRENCE uniquement, avec le résultat réel de
      candidature s'il est connu (jamais recopié tel quel)
                             ▼
-        Étape 1 : analyse initiale (Groq, openai/gpt-oss-20b)
+        Étape 1 : analyse initiale (Groq, openai/gpt-oss-120b)
                             ▼
         Étape 2 : relecture critique et correction (Mistral,
         mistral-small-latest) → score final + traçabilité de l'ajustement
@@ -203,7 +203,7 @@ Sans `GROUPE_ID`/`MOTS_CLES_GROUPE`, le script traite l'intégralité de `MOTS_C
 
 Le workflow `.github/workflows/veille.yml` :
 1. Lance les 3 groupes (`secu`, `cloud-devops`, `infra-sre`) **en parallèle**, chacun avec son sous-ensemble de mots-clés
-2. Chaque groupe : applique le feedback réel connu, interroge France Travail + La Bonne Alternance + scrape les 3 plateformes, déduplique, filtre, analyse via Groq puis Mistral, associe le CV recommandé, met à jour son Excel et son historique
+2. Chaque groupe : applique le feedback réel connu, interroge France Travail + La Bonne Alternance + scrape les 2 plateformes, déduplique, filtre, analyse via Groq puis Mistral, associe le CV recommandé, met à jour son Excel et son historique
 3. Une fois les 3 groupes terminés (`needs: veille`, `if: always()`), le job `fusionner` télécharge leurs résultats et produit `suivi_candidatures_MASTER.xlsx`
 4. Un e-mail de fin de pipeline est envoyé avec le résumé et l'Excel Master en pièce jointe
 
@@ -225,7 +225,7 @@ Déclenchement : automatique tous les jours (`cron`), ou manuel via l'onglet **A
 | Statuts de feedback réel | `feedback_candidatures.json` | `entretien` / `refus` / `sans_reponse` (texte libre accepté) |
 | Quota d'analyses IA par run/groupe | `MAX_ANALYSES_PAR_RUN` | 15 |
 | Durée de mémoire anti-doublons | `JOURS_MEMOIRE` | 14 jours |
-| Modèle étape 1 (dégrossissage) | `MODELE_IA` | `openai/gpt-oss-20b` (Groq) |
+| Modèle étape 1 (dégrossissage) | `MODELE_IA` | `openai/gpt-oss-120b` (Groq) |
 | Modèle étape 2 (relecture) | `MODELE_IA_VALIDATION` | `mistral-small-latest` (Mistral) |
 | Fichier Excel | `FICHIER_EXCEL` | `suivi_candidatures_<groupe>.xlsx` |
 
@@ -237,7 +237,7 @@ Déclenchement : automatique tous les jours (`cron`), ou manuel via l'onglet **A
 | **Requests + OAuth2** | API France Travail (token *client credentials*) |
 | **API La Bonne Alternance** | Agrégateur officiel d'offres d'apprentissage, par code ROME |
 | **Playwright** (Chromium headless) | Scraping des plateformes dynamiques |
-| **Groq Cloud** — `openai/gpt-oss-20b` | Analyse IA initiale (rapide, sortie JSON forcée) |
+| **Groq Cloud** — `openai/gpt-oss-120b` | Analyse IA initiale (rapide, sortie JSON forcée) |
 | **Mistral La Plateforme** — `mistral-small-latest` | Relecture critique et correction (fournisseur indépendant) |
 | **ChromaDB** (persistant, un par groupe) | Mémoire vectorielle RAG des verdicts passés |
 | **pandas + openpyxl** | Tableaux de bord Excel (par groupe + Master fusionné) |

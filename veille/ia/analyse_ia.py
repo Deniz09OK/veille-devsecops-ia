@@ -16,8 +16,9 @@ from ..core.utils import valider_match_tech, comparer_scores
 # toutes les clés attendues et le format "X/10" pour match_tech, plutôt que de
 # rattraper après coup une réponse mal formée (cf. valider_match_tech).
 # Non appliqué à l'étape 1 (Groq, en mode "json_object" plus permissif) : pas
-# une contrainte technique avec le modèle actuel (openai/gpt-oss-20b supporte
-# aussi le json_schema strict côté Groq), mais on garde une étape 1 volontairement
+# une contrainte technique avec les modèles gpt-oss de Groq (openai/gpt-oss-20b
+# ET openai/gpt-oss-120b supportent aussi le json_schema strict), mais on garde
+# une étape 1 volontairement
 # souple pour laisser l'étape 2 (relecture Mistral) faire le travail de mise en forme.
 SCHEMA_ANALYSE_FINALE = {
     "type": "json_schema",

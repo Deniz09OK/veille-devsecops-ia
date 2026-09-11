@@ -29,17 +29,11 @@ SOURCES_TEMPLATES = [
     # par capture d'écran) et Welcome to the Jungle (la recherche est
     # désormais pilotée en JS côté client, l'URL ne reflète plus la requête —
     # nécessiterait d'interagir avec la page plutôt qu'une simple URL).
-    {
-        # Ancienne URL (/offres-emploi/{mot}) morte (404). La vraie page de
-        # résultats est /offres/emploi-it?tag=..., et les offres individuelles
-        # ne sont PAS sous /offres/ mais sous /candidates/offers/<slug>
-        # (confirmé en inspectant une vraie carte d'offre affichée) : l'ancien
-        # sélecteur ne matchait donc jamais rien depuis la refonte du site.
-        "nom": "Choose Your Boss",
-        "url_template": "https://www.chooseyourboss.com/offres/emploi-it?tag={mot}",
-        "aimant_css": 'a[href*="/candidates/offers/"]',
-        "domaine": "https://www.chooseyourboss.com",
-    },
+    # Choose Your Boss retirée aussi : l'URL a été corrigée (l'ancienne
+    # /offres-emploi/{mot} était une 404 depuis leur refonte), mais le site est
+    # protégé par Cloudflare et bloque la session dès la 2e requête rapprochée
+    # — persistant même avec 10s de pause entre les requêtes. Au mieux 1 seule
+    # recherche aboutirait par run, pour un coût de maintenance disproportionné.
 ]
 
 
