@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from veille.core.feedback import charger_feedback, enregistrer_feedback, main as feedback_main
 from veille.core.historique import charger_historique, ecrire_historique
@@ -35,6 +35,25 @@ def test_feedback_enregistre_avec_url_normalisee(tmp_path):
     assert feedback == {"https://www.apec.fr/candidat/recherche-emploi.html/emploi/detail-offre/42": {"statut": "entretien", "date": "2026-09-01"}}
 
 
+def test_feedback_illisible(tmp_path):
+    casse = tmp_path / "feedback.json"
+    casse.write_text("{pas du json", encoding="utf-8")
+    assert charger_feedback(str(casse)) == {}
+
+
 def test_feedback_cli_usage(capsys):
     assert feedback_main(["feedback"]) == 1
     assert "Usage" in capsys.readouterr().out
+
+
+def test_feedback_cli_enregistre_et_signale_un_statut_inhabituel(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    assert feedback_main(["feedback", "https://www.apec.fr/detail-offre/7?x=1", "entretien", "2026-09-10"]) == 0
+    assert feedback_main(["feedback", "https://exemple.test/offre", "ghosting"]) == 0
+
+    sortie = capsys.readouterr().out
+    assert "Feedback 'entretien' enregistré" in sortie and "inhabituel" in sortie
+    feedback = json.loads((tmp_path / "feedback_candidatures.json").read_text(encoding="utf-8"))
+    assert feedback["https://www.apec.fr/detail-offre/7"] == {"statut": "entretien", "date": "2026-09-10"}
+    assert feedback["https://exemple.test/offre"]["statut"] == "ghosting"
+    assert feedback["https://exemple.test/offre"]["date"] == date.today().isoformat()

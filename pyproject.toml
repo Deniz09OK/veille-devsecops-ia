@@ -1,6 +1,15 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-ra"
+
+[tool.coverage.run]
+source = ["veille"]
+
+[tool.coverage.report]
+fail_under = 95
+show_missing = true
+skip_empty = true
+exclude_also = ["if __name__ == .__main__.:"]
 
 [tool.ruff]
 line-length = 140

@@ -10,7 +10,48 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  tests:
+    uses: ./.github/workflows/tests.yml
+
+  alerte-tests:
+    needs: tests
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Télécharger la sortie de pytest
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: rapport-tests-${{ github.run_id }}
+
+      - name: Garantir une pièce jointe
+        run: test -f rapport_tests.txt || echo "Sortie de pytest indisponible, voir les logs du run." > rapport_tests.txt
+
+      - name: Envoyer l'alerte
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_APP_PASSWORD }}
+          from: Veille DevSecOps <${{ secrets.EMAIL_USERNAME }}>
+          to: ${{ secrets.EMAIL_USERNAME }}
+          subject: 🚫 Veille DevSecOps - Tests en échec, veille bloquée aujourd'hui
+          body: |
+            Les tests unitaires ont échoué avant le lancement de la veille du jour.
+            La collecte, l'analyse IA et la fusion n'ont PAS été exécutées.
+
+            Détails : https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            La sortie complète de pytest est en pièce jointe.
+
+            Pour rattraper la veille du jour :
+            1. corriger le problème et pousser (le workflow Tests vérifie le correctif)
+            2. onglet Actions -> Veille DevSecOps -> Run workflow
+          attachments: rapport_tests.txt
+
   veille:
+    needs: tests
     strategy:
       fail-fast: false
       matrix:
@@ -108,8 +149,8 @@ jobs:
           if-no-files-found: warn
 
   fusionner:
-    needs: veille
-    if: always()
+    needs: [tests, veille]
+    if: always() && needs.tests.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

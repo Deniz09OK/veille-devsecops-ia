@@ -1,0 +1,12 @@
+default_install_hook_types: [pre-push]
+
+repos:
+  - repo: local
+    hooks:
+      - id: tests-avant-push
+        name: Tests unitaires et couverture (pytest) avant push
+        entry: python -m pytest --cov
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

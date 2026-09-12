@@ -101,7 +101,8 @@ def generer_excel(offres_triees):
     if not df_nouveau.empty and not df_ancien.empty and COL_LIEN in df_ancien.columns:
         df_nouveau = df_nouveau[~df_nouveau[COL_LIEN].isin(df_ancien[COL_LIEN].values)]
 
-    df_final = pd.concat([df_ancien, df_nouveau], ignore_index=True)
+    morceaux = [df for df in (df_ancien, df_nouveau) if not df.empty]
+    df_final = pd.concat(morceaux, ignore_index=True) if morceaux else pd.DataFrame()
     if df_final.empty:
         print("⚠️ Aucune donnée à écrire dans l'Excel aujourd'hui.")
         return

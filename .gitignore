@@ -6,6 +6,10 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+rapport_tests.txt
 
 memoire_ia/
 memoire_ia_*/

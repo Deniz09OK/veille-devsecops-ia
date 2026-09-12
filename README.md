@@ -58,7 +58,7 @@ Agent autonome qui automatise la recherche, le filtrage et l'évaluation techniq
 - 🔒 **Concurrency guard** : empêche deux runs de tourner en parallèle
 - 💾 **Persistance via cache** (pas de commit Git) : mémoire IA, historique anti-doublons, Excel et rapports survivent d'un run à l'autre grâce au cache GitHub Actions
 - ⚡ **Runs plus rapides** : cache pip, cache du navigateur Chromium (clé sur la version de Playwright) et cache du modèle d'embedding ChromaDB ; `sentence-transformers` (et donc PyTorch) n'est plus installé, ChromaDB utilise son modèle ONNX intégré
-- 🧪 **Tests unitaires** (`pytest`) sur les filtres, l'extraction des notes, le pipeline et la fusion, lancés à chaque push via `.github/workflows/tests.yml`
+- 🧪 **Tests unitaires comme garde-fou quotidien** : `pytest` (avec seuil de couverture) tourne à chaque push et **avant chaque veille**. En cas d'échec : e-mail d'alerte et veille bloquée pour la journée, pour ne jamais lancer une collecte sur du code cassé — voir la section Tests
 - 📦 **Artefacts téléchargeables** : résultats de chaque groupe + Master, conservés 30 jours
 
 ---
@@ -76,11 +76,13 @@ Agent autonome qui automatise la recherche, le filtrage et l'évaluation techniq
 │   ├── collecte/                    #   France Travail, La Bonne Alternance, scraping Playwright
 │   ├── ia/                          #   Analyse IA collaborative (Groq + Mistral) + RAG
 │   └── sortie/                      #   Rapport Markdown, Excel (+ excel_style), notifications Discord
-├── tests/                           # Tests unitaires pytest
+├── tests/                           # Tests unitaires pytest (tests/fixtures : pages HTML locales pour le scraping)
 ├── requirements.txt                 # Dépendances d'exécution (requirements-dev.txt pour les tests)
+├── pyproject.toml                   # Configuration pytest et couverture (seuil minimal)
+├── .pre-commit-config.yaml          # Hook pre-push : lance les tests avant chaque git push
 ├── .env                             # Secrets locaux (non versionné)
-├── .github/workflows/veille.yml    # Pipeline CI/CD (matrix 3 groupes + fusion + email)
-├── .github/workflows/tests.yml     # Tests à chaque push / pull request
+├── .github/workflows/veille.yml    # Pipeline CI/CD (tests → matrix 3 groupes → fusion → email)
+├── .github/workflows/tests.yml     # Tests + couverture, à chaque push / PR et appelé par veille.yml
 ├── cv/                              # CV par groupe, versionnés dans Git (fichiers statiques)
 │   ├── CV_Deniz_OK_secu.pdf
 │   ├── CV_Deniz_OK_ATS_secu.pdf
@@ -103,6 +105,9 @@ Agent autonome qui automatise la recherche, le filtrage et l'évaluation techniq
 ### Pipeline de traitement (par groupe, en parallèle)
 
 ```
+     Tests unitaires (job "tests") — en échec ? → e-mail d'alerte,
+     veille et fusion NON lancées ce jour-là
+                            ▼
      Application du feedback réel (feedback_candidatures.json) dans
      la mémoire RAG du groupe — une fois, avant de traiter les offres
                             ▼
@@ -164,9 +169,9 @@ pip install -r requirements.txt
 # 2. Navigateur Chromium pour Playwright
 playwright install chromium
 
-# 3. (Optionnel) Tests unitaires
+# 3. (Recommandé) Outils de test + hook pre-push, voir la section Tests
 pip install -r requirements-dev.txt
-pytest
+pre-commit install
 ```
 
 ## 🔐 Configuration
@@ -231,12 +236,38 @@ python -m veille.fusion resultats-bruts suivi_candidatures_MASTER.xlsx
 ### Automatisation (GitHub Actions)
 
 Le workflow `.github/workflows/veille.yml` :
-1. Lance les 3 groupes (`secu`, `cloud-devops`, `infra-sre`) **en parallèle**, chacun avec son sous-ensemble de mots-clés
-2. Chaque groupe : applique le feedback réel connu, interroge France Travail + La Bonne Alternance + scrape les 2 plateformes, déduplique, filtre, analyse via Groq puis Mistral, associe le CV recommandé, met à jour son Excel et son historique
-3. Une fois les 3 groupes terminés (`needs: veille`, `if: always()`), le job `fusionner` télécharge leurs résultats et produit `suivi_candidatures_MASTER.xlsx` via `python -m veille.fusion` (même code de style Excel et même seuil que les groupes, plus de copie à synchroniser à la main)
-4. Un e-mail de fin de pipeline est envoyé avec le résumé et l'Excel Master en pièce jointe
+1. Lance d'abord les **tests unitaires** (workflow `tests.yml` réutilisé). S'ils échouent : un e-mail d'alerte part avec la sortie complète de `pytest` en pièce jointe, et **la veille du jour est bloquée** (groupes et fusion non exécutés)
+2. Lance les 3 groupes (`secu`, `cloud-devops`, `infra-sre`) **en parallèle**, chacun avec son sous-ensemble de mots-clés
+3. Chaque groupe : applique le feedback réel connu, interroge France Travail + La Bonne Alternance + scrape les 2 plateformes, déduplique, filtre, analyse via Groq puis Mistral, associe le CV recommandé, met à jour son Excel et son historique
+4. Une fois les 3 groupes terminés, le job `fusionner` télécharge leurs résultats et produit `suivi_candidatures_MASTER.xlsx` via `python -m veille.fusion` (même code de style Excel et même seuil que les groupes, plus de copie à synchroniser à la main)
+5. Un e-mail de fin de pipeline est envoyé avec le résumé et l'Excel Master en pièce jointe
 
-Déclenchement : automatique tous les jours (`cron`), ou manuel via l'onglet **Actions → Run workflow**.
+Déclenchement : automatique tous les jours (`cron`), ou manuel via l'onglet **Actions → Run workflow**. Après un correctif suite à une alerte de tests, ce lancement manuel permet de rattraper la veille du jour.
+
+## 🧪 Tests
+
+Les tests ne font **aucun appel réseau** : les API, Groq, Mistral, ChromaDB, Discord et Playwright sont remplacés par des doublures (`tests/doublures.py`). Un seul test lance réellement Chromium, sur des pages HTML locales (`tests/fixtures/`), et il est ignoré si le navigateur n'est pas installé.
+
+| Commande | Usage |
+|---|---|
+| `pytest` | Lance tout, en une vingtaine de secondes |
+| `pytest -v` | Affiche chaque test par son nom : lisible comme une checklist des comportements attendus |
+| `pytest --cov` | Ajoute le tableau de couverture par fichier avec les lignes non testées ; échoue sous le seuil `fail_under` de `pyproject.toml` |
+| `pytest --cov --cov-report=html` | Génère `htmlcov/index.html`, à ouvrir dans un navigateur pour voir ligne par ligne ce qui est couvert |
+| `pytest tests/test_filtres.py` | Un seul fichier, par exemple pendant qu'on retouche les filtres |
+
+Ce qui est couvert : filtres, notes, utilitaires, historique, feedback, configuration, collecte (France Travail, La Bonne Alternance, scraping), analyse IA (prompts, mémoire RAG, retries), pipeline, rapport Markdown, Excel, Discord, fusion Master et point d'entrée.
+
+Ce que les tests ne peuvent pas détecter : un changement de HTML sur HelloWork/APEC ou une évolution des API. Pour ça, seul un vrai run compte (`workflow_dispatch`, ou lancement local avec le `.env`).
+
+### Avant chaque push (hook local)
+
+`pre-commit install` (une seule fois, après `pip install -r requirements-dev.txt`) pose un hook `pre-push` : `git push` lance `pytest --cov` et refuse l'envoi si un test échoue ou si la couverture passe sous le seuil. Le push subit donc exactement la même vérification que la CI. Pour pousser malgré tout (rare) : `git push --no-verify`.
+
+### En CI
+
+- `tests.yml` tourne à chaque push et pull request, avec le tableau de couverture dans le résumé du job et la sortie complète de `pytest` en artefact
+- `veille.yml` appelle ce même workflow **avant** de lancer la veille. En échec : e-mail d'alerte (`🚫 Tests en échec, veille bloquée aujourd'hui`) avec le rapport en pièce jointe, et les jobs `veille` et `fusionner` ne sont pas exécutés. Une fois le correctif poussé, relancer la veille depuis **Actions → Run workflow**
 
 ## 🔧 Personnalisation
 

@@ -1,6 +1,9 @@
+import sys
+
 import pytest
 
 from veille.core.utils import (
+    activer_console_utf8,
     comparer_scores,
     extraire_note,
     normaliser_champ,
@@ -60,9 +63,16 @@ def test_normaliser_url_offre_apec():
     assert normaliser_url_offre(url) == "https://www.apec.fr/candidat/recherche-emploi.html/emploi/detail-offre/123"
 
 
+def test_normaliser_url_offre_indeed():
+    assert normaliser_url_offre("https://fr.indeed.com/viewjob?jk=abc123&from=serp") == "https://fr.indeed.com/viewjob?jk=abc123"
+    assert normaliser_url_offre("https://fr.indeed.com/jobs?q=devops") == "https://fr.indeed.com/jobs?q=devops"
+
+
 def test_normaliser_url_offre_autre_site_inchange():
     url = "https://www.hellowork.com/fr-fr/emplois/1.html?utm=x"
     assert normaliser_url_offre(url) == url
+    assert normaliser_url_offre("") == ""
+    assert normaliser_url_offre("http://[adresse-invalide") == "http://[adresse-invalide"
 
 
 def test_offre_deja_analysee():
@@ -71,3 +81,16 @@ def test_offre_deja_analysee():
     assert offre_deja_analysee(texte + " ", vus) == 0
     assert offre_deja_analysee("Offre totalement différente : boulanger à Lille.", vus) is None
     assert offre_deja_analysee("", vus) is None
+
+
+def test_activer_console_utf8_tolere_les_flux_exotiques(monkeypatch):
+    class FluxSansReconfigure:
+        pass
+
+    class FluxCapricieux:
+        def reconfigure(self, **kwargs):
+            raise ValueError("non")
+
+    monkeypatch.setattr(sys, "stdout", FluxSansReconfigure())
+    monkeypatch.setattr(sys, "stderr", FluxCapricieux())
+    activer_console_utf8()
