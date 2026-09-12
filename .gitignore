@@ -1,15 +1,19 @@
-
 .env
 
 .venv/
 venv/
 __pycache__/
 *.pyc
+.pytest_cache/
+.ruff_cache/
 
 memoire_ia/
-memoire_ia_secu/
+memoire_ia_*/
 historique_offres.json
+historique_offres_*.json
 suivi_candidatures.xlsx
+suivi_candidatures_*.xlsx
+resultats-bruts/
 Historique/
 debug_screenshots/
 *.log

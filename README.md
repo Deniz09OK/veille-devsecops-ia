@@ -20,9 +20,9 @@ Agent autonome qui automatise la recherche, le filtrage et l'évaluation techniq
 - 🔗 Un job **`fusionner`** rassemble les résultats des 3 groupes en un seul **Excel Master**, dédupliqué par lien d'offre
 
 ### Filtrage (avant de consommer du temps IA)
-- 🚪 **Filtre géographique strict** : "Nancy"/54/Meurthe-et-Moselle valide toujours l'offre, tout comme Metz, Thionville, Sarrebourg, Bar-le-Duc et Épinal (villes accessibles en TER direct depuis Nancy — candidat sans permis). Toute autre ville n'est acceptée qu'avec un signal **non ambigu** de télétravail intégral (`100% télétravail`, `full remote`...) — le simple mot "télétravail"/"remote" isolé ne suffit plus (il peut apparaître dans la navigation générique d'un site, sans rapport avec l'offre elle-même)
-- 📋 **Filtre type de contrat** : exige la présence explicite d'un terme d'alternance/apprentissage — écarte les CDI/CDD classiques
-- 🎓 **Anti-écoles concurrentes** : liste noire (ISCOD, CESI, OpenClassrooms, EPSI, Sup de Vinci…)
+- 🚪 **Filtre géographique strict** : "Nancy"/54/Meurthe-et-Moselle valide toujours l'offre, tout comme la banlieue de Nancy (Laxou, Maxéville, Tomblaine, Ludres…), Toul, Lunéville, Pont-à-Mousson, Metz, Thionville, Sarrebourg, Bar-le-Duc et Épinal (villes accessibles en TER direct depuis Nancy — candidat sans permis). Toute autre ville n'est acceptée qu'avec un signal **non ambigu** de télétravail intégral (`100% télétravail`, `full remote`...) — le simple mot "télétravail"/"remote" isolé ne suffit plus (il peut apparaître dans la navigation générique d'un site, sans rapport avec l'offre elle-même). Pour France Travail le code postal structuré valide directement la logistique ; pour La Bonne Alternance c'est le champ `contract.remote` de l'API. Les noms de villes et d'écoles sont comparés par **mot entier**, accents ignorés (fini "Metzervisse" qui matche "Metz" ou "Pepsi" qui matche "EPSI")
+- 📋 **Filtre type de contrat** : exige la présence explicite d'un terme d'alternance/apprentissage — écarte les CDI/CDD classiques (appliqué au scraping uniquement, les deux API ne renvoient que de l'alternance par construction)
+- 🎓 **Anti-écoles concurrentes** : liste noire (ISCOD, CESI, OpenClassrooms, EPSI, Sup de Vinci…), filtre indépendant appliqué à toutes les sources — un code postal 54 ne permet plus de le contourner
 - 🔁 **Anti-doublons inter-runs** : mémoire de 14 jours par groupe (`historique_offres_<groupe>.json`), avec normalisation des URLs (APEC) et du code postal (comparaison stricte du département, pas une recherche de sous-chaîne)
 - 🔁 **Anti-doublons intra-run, avant l'appel IA** : une même offre postée sur plusieurs sources (ex: France Travail + La Bonne Alternance, qui resyndique souvent France Travail) est détectée par similarité de texte (`difflib`) et ne consomme qu'**une seule** analyse IA — le lien supplémentaire est simplement rattaché à l'entrée existante
 
@@ -32,9 +32,10 @@ Agent autonome qui automatise la recherche, le filtrage et l'évaluation techniq
 - 🗃️ **Mémoire vectorielle RAG (ChromaDB)**, une base par groupe : chaque offre est vectorisée et comparée aux évaluations passées, injectée en **référence de calibration uniquement** (jamais recopiée telle quelle)
 - 🔄 **Boucle de feedback réel** (`feedback_candidatures.json`, versionné dans Git) : l'utilisateur y enregistre le résultat réel d'une candidature (`entretien` / `refus` / `sans_reponse` + date), reporté dans les métadonnées ChromaDB au début de chaque run. La calibration RAG (étapes 1 **et** 2) en tient compte pour recalibrer sur des résultats réels plutôt que sur la seule cohérence de l'IA avec elle-même
 - 🏢 **Nom d'entreprise fiabilisé** : pour les offres France Travail, le nom structuré fourni par l'API est utilisé en priorité plutôt que de laisser l'IA le deviner du texte libre
-- 🛡️ **Filet de sécurité anti-format cassé** : validation systématique du format de note, retry automatique sur erreur de rate-limit (429)
+- 🛡️ **Filet de sécurité anti-format cassé** : validation systématique du format de note (extraction par regex, bornée entre 0 et 10), retry automatique sur erreur de rate-limit (429)
+- 🔁 **Pas d'offre perdue sur panne IA** : si l'analyse échoue (fournisseur indisponible, erreur réseau), l'offre n'est **pas** inscrite dans l'historique anti-doublons et sera retentée au run suivant
 - 🎯 **Quota de sécurité** (`MAX_ANALYSES_PAR_RUN = 15`) : plafonne le nombre d'analyses IA par run et par groupe
-- ✍️ **Génération de candidature** : pour toute offre notée ≥ 8/10 (score final), un message d'accroche LinkedIn et une ébauche de lettre de motivation sont générés automatiquement
+- ✍️ **Génération de candidature** : pour toute offre notée ≥ 8/10 (score final), un message d'accroche LinkedIn et une ébauche de lettre de motivation sont générés automatiquement, à partir du profil du candidat, des points forts identifiés et du texte de l'offre
 
 ### Recommandation de CV
 - 📄 **Un CV adapté par groupe**, en 2 versions chacun :
@@ -44,9 +45,10 @@ Agent autonome qui automatise la recherche, le filtrage et l'évaluation techniq
 - Les liens vers les 2 versions (`CV (design)` / `CV (ATS)`) sont ajoutés automatiquement dans l'Excel, pointant vers le repo GitHub — plus besoin de deviner quel CV joindre à quelle candidature
 
 ### Sorties & notifications
-- 📊 **Tableau de bord Excel** par groupe + Master fusionné : entreprise, poste, score final, score initial, ajustement collaboratif, verdict, CV recommandés, message LinkedIn, lettre de motivation, colonnes **Statut**/**Notes perso** libres
+- 📊 **Tableau de bord Excel** par groupe + Master fusionné : entreprise, poste, score final, score initial, ajustement collaboratif, verdict, CV recommandés, message LinkedIn, lettre de motivation, colonnes **Statut**/**Notes perso** libres. En-tête figée, filtres automatiques et largeurs de colonnes adaptées
 - 🎨 **Mise en forme conditionnelle** sur le score final : vert (≥ seuil de candidature), orange (5 à ce seuil), rouge (< 5) — repérer les offres intéressantes d'un coup d'œil sans lire chaque ligne
-- 🧹 **Revalidation rétroactive** : à chaque run (même sans nouvelle offre), les lignes déjà présentes dans l'Excel sont repassées au filtre secteur public actuel (Entreprise + Titre du Poste + Verdict IA, seules infos conservées a posteriori) et retirées si elles ne passeraient plus — utile quand le filtre s'améliore après coup, sans purge manuelle
+- 🧹 **Revalidation rétroactive** : à chaque run (même sans nouvelle offre), les lignes déjà présentes dans l'Excel sont repassées aux filtres secteur public et écoles concurrentes actuels (Entreprise + Titre du Poste + Verdict IA, seules infos conservées a posteriori) et retirées si elles ne passeraient plus — utile quand le filtre s'améliore après coup, sans purge manuelle
+- 💾 **Sorties garanties même en cas de crash** : l'historique, le rapport Markdown et l'Excel sont écrits dans un bloc `finally`, donc les analyses déjà faites ne sont pas perdues si le scraping plante en cours de run
 - 📁 **Rapports Markdown quotidiens**, archivés par jour et par groupe
 - 🔔 **Alertes Discord en temps réel** dès qu'une offre passe tous les filtres
 - 📧 **E-mail de fin de pipeline** (Gmail SMTP) : résumé chiffré (nombre d'offres, meilleure offre du jour), lien vers le run, Excel Master en pièce jointe — envoyé que le run réussisse ou échoue
@@ -55,6 +57,8 @@ Agent autonome qui automatise la recherche, le filtrage et l'évaluation techniq
 - ⏰ **GitHub Actions** : exécution quotidienne programmée (`cron`) + déclenchement manuel (`workflow_dispatch`)
 - 🔒 **Concurrency guard** : empêche deux runs de tourner en parallèle
 - 💾 **Persistance via cache** (pas de commit Git) : mémoire IA, historique anti-doublons, Excel et rapports survivent d'un run à l'autre grâce au cache GitHub Actions
+- ⚡ **Runs plus rapides** : cache pip, cache du navigateur Chromium (clé sur la version de Playwright) et cache du modèle d'embedding ChromaDB ; `sentence-transformers` (et donc PyTorch) n'est plus installé, ChromaDB utilise son modèle ONNX intégré
+- 🧪 **Tests unitaires** (`pytest`) sur les filtres, l'extraction des notes, le pipeline et la fusion, lancés à chaque push via `.github/workflows/tests.yml`
 - 📦 **Artefacts téléchargeables** : résultats de chaque groupe + Master, conservés 30 jours
 
 ---
@@ -65,13 +69,18 @@ Agent autonome qui automatise la recherche, le filtrage et l'évaluation techniq
 .
 ├── veille_devsecops.py             # Point d'entrée (appelle veille.main.executer)
 ├── veille/                          # Package principal
-│   ├── main.py                      #   Orchestration du pipeline (executer())
-│   ├── core/                        #   config, filtres, historique, utils, feedback
+│   ├── main.py                      #   Générateurs d'offres par source + executer()
+│   ├── pipeline.py                  #   OffreCandidate + Pipeline (filtres, dédup, IA, Discord) commun à toutes les sources
+│   ├── fusion.py                    #   Fusion des Excel de groupe en Master (python -m veille.fusion)
+│   ├── core/                        #   constantes (sans effet de bord), config (env + clients à la demande), filtres, historique, utils, feedback
 │   ├── collecte/                    #   France Travail, La Bonne Alternance, scraping Playwright
 │   ├── ia/                          #   Analyse IA collaborative (Groq + Mistral) + RAG
-│   └── sortie/                      #   Rapport Markdown, Excel, notifications Discord
+│   └── sortie/                      #   Rapport Markdown, Excel (+ excel_style), notifications Discord
+├── tests/                           # Tests unitaires pytest
+├── requirements.txt                 # Dépendances d'exécution (requirements-dev.txt pour les tests)
 ├── .env                             # Secrets locaux (non versionné)
 ├── .github/workflows/veille.yml    # Pipeline CI/CD (matrix 3 groupes + fusion + email)
+├── .github/workflows/tests.yml     # Tests à chaque push / pull request
 ├── cv/                              # CV par groupe, versionnés dans Git (fichiers statiques)
 │   ├── CV_Deniz_OK_secu.pdf
 │   ├── CV_Deniz_OK_ATS_secu.pdf
@@ -150,10 +159,14 @@ Agent autonome qui automatise la recherche, le filtrage et l'évaluation techniq
 
 ```bash
 # 1. Dépendances Python
-pip install requests playwright python-dotenv chromadb pandas openpyxl groq sentence-transformers mistralai
+pip install -r requirements.txt
 
 # 2. Navigateur Chromium pour Playwright
 playwright install chromium
+
+# 3. (Optionnel) Tests unitaires
+pip install -r requirements-dev.txt
+pytest
 ```
 
 ## 🔐 Configuration
@@ -201,12 +214,26 @@ GROUPE_ID=secu MOTS_CLES_GROUPE="SecOps,Cloud Security Engineer" python veille_d
 
 Sans `GROUPE_ID`/`MOTS_CLES_GROUPE`, le script traite l'intégralité de `MOTS_CLES_COMPLETS` sous l'identifiant `default`.
 
+### Enregistrer le résultat réel d'une candidature
+
+```bash
+python -m veille.core.feedback "https://www.hellowork.com/fr-fr/emplois/12345.html" entretien 2026-09-12
+```
+
+L'URL est normalisée comme dans le pipeline (donc identique à la clé utilisée dans la mémoire RAG), le statut attendu est `entretien`, `refus` ou `sans_reponse`, la date est optionnelle (aujourd'hui par défaut). Le fichier `feedback_candidatures.json` est mis à jour et sera pris en compte au prochain run après commit.
+
+### Fusionner des Excel de groupe localement
+
+```bash
+python -m veille.fusion resultats-bruts suivi_candidatures_MASTER.xlsx
+```
+
 ### Automatisation (GitHub Actions)
 
 Le workflow `.github/workflows/veille.yml` :
 1. Lance les 3 groupes (`secu`, `cloud-devops`, `infra-sre`) **en parallèle**, chacun avec son sous-ensemble de mots-clés
 2. Chaque groupe : applique le feedback réel connu, interroge France Travail + La Bonne Alternance + scrape les 2 plateformes, déduplique, filtre, analyse via Groq puis Mistral, associe le CV recommandé, met à jour son Excel et son historique
-3. Une fois les 3 groupes terminés (`needs: veille`, `if: always()`), le job `fusionner` télécharge leurs résultats et produit `suivi_candidatures_MASTER.xlsx`
+3. Une fois les 3 groupes terminés (`needs: veille`, `if: always()`), le job `fusionner` télécharge leurs résultats et produit `suivi_candidatures_MASTER.xlsx` via `python -m veille.fusion` (même code de style Excel et même seuil que les groupes, plus de copie à synchroniser à la main)
 4. Un e-mail de fin de pipeline est envoyé avec le résumé et l'Excel Master en pièce jointe
 
 Déclenchement : automatique tous les jours (`cron`), ou manuel via l'onglet **Actions → Run workflow**.
@@ -216,20 +243,22 @@ Déclenchement : automatique tous les jours (`cron`), ou manuel via l'onglet **A
 | Paramètre | Emplacement | Valeur par défaut |
 |---|---|---|
 | Groupes et répartition des mots-clés | `matrix.include` dans `veille.yml` | 3 groupes (secu / cloud-devops / infra-sre) |
-| Liste complète des mots-clés | `MOTS_CLES_COMPLETS` | 13 intitulés (SecOps → Release Engineer) |
-| Codes ROME par groupe (La Bonne Alternance) | `ROME_PAR_GROUPE` | secu → M1802, cloud-devops → M1801, infra-sre → M1810 |
-| Zone géographique | `filtre_logistique()` / `code_postal_accepte()` | Nancy / 54 / Metz / Thionville / Sarrebourg / Bar-le-Duc / Épinal / télétravail intégral non ambigu |
-| Terme de contrat exigé | `filtre_type_contrat()` | alternance, apprentissage, contrat de pro |
-| CV recommandé par groupe | `CV_PAR_GROUPE` | liens vers `cv/CV_Deniz_OK_<groupe>[_ATS].pdf` |
-| Seuil de génération de candidature | `SEUIL_CANDIDATURE` | 8.0 / 10 |
-| Seuil de similarité mémoire RAG | `analyser_technique_ia()` | distance < 1.0 |
-| Seuil de similarité anti-doublons intra-run (avant appel IA) | `SEUIL_SIMILARITE_DEDUP` | ratio `difflib` ≥ 0.85 |
+| Liste complète des mots-clés | `MOTS_CLES_COMPLETS` (`core/constantes.py`) | 13 intitulés (SecOps → Release Engineer) |
+| Codes ROME par groupe (La Bonne Alternance) | `ROME_PAR_GROUPE` (`core/constantes.py`) | secu → M1802, cloud-devops → M1801, infra-sre → M1810 |
+| Zone géographique | `VILLES_54` / `VILLES_TER_NANCY` / `SIGNAUX_FULL_REMOTE` (`core/filtres.py`) | Nancy et banlieue / 54 / Toul / Lunéville / Pont-à-Mousson / Metz / Thionville / Sarrebourg / Bar-le-Duc / Épinal / télétravail intégral non ambigu |
+| Écoles écartées | `ECOLES_CONCURRENTES` (`core/filtres.py`) | ISCOD, CESI, OpenClassrooms, Sup de Vinci, My Digital School, EPSI |
+| Terme de contrat exigé | `MOTS_ALTERNANCE` (`core/filtres.py`) | alternance, alternant, apprenti, contrat de pro |
+| CV recommandé par groupe | `CV_PAR_GROUPE` (`core/constantes.py`) | liens vers `cv/CV_Deniz_OK_<groupe>[_ATS].pdf` |
+| Seuil de génération de candidature | `SEUIL_CANDIDATURE` (`core/constantes.py`) | 8.0 / 10 |
+| Seuil de similarité mémoire RAG | `SEUIL_DISTANCE_RAG` (`core/constantes.py`) | distance < 1.0 |
+| Seuil de similarité anti-doublons intra-run (avant appel IA) | `SEUIL_SIMILARITE_DEDUP` (`core/utils.py`) | ratio `difflib` ≥ 0.85 |
 | Statuts de feedback réel | `feedback_candidatures.json` | `entretien` / `refus` / `sans_reponse` (texte libre accepté) |
-| Quota d'analyses IA par run/groupe | `MAX_ANALYSES_PAR_RUN` | 15 |
-| Durée de mémoire anti-doublons | `JOURS_MEMOIRE` | 14 jours |
-| Modèle étape 1 (dégrossissage) | `MODELE_IA` | `openai/gpt-oss-120b` (Groq) |
-| Modèle étape 2 (relecture) | `MODELE_IA_VALIDATION` | `mistral-small-latest` (Mistral) |
-| Fichier Excel | `FICHIER_EXCEL` | `suivi_candidatures_<groupe>.xlsx` |
+| Quota d'analyses IA par run/groupe | `MAX_ANALYSES_PAR_RUN` (`core/constantes.py`) | 15 |
+| Pause entre deux analyses IA | `PAUSE_ENTRE_ANALYSES` (`core/constantes.py`) | 2 s |
+| Durée de mémoire anti-doublons | `JOURS_MEMOIRE` (`core/constantes.py`) | 14 jours |
+| Modèle étape 1 (dégrossissage) | `MODELE_IA` (`core/constantes.py`) | `openai/gpt-oss-120b` (Groq) |
+| Modèle étape 2 (relecture) | `MODELE_IA_VALIDATION` (`core/constantes.py`) | `mistral-small-latest` (Mistral) |
+| Fichier Excel | `FICHIER_EXCEL` (`core/config.py`) | `suivi_candidatures_<groupe>.xlsx` |
 
 ## 🛠️ Stack technique
 
@@ -241,9 +270,10 @@ Déclenchement : automatique tous les jours (`cron`), ou manuel via l'onglet **A
 | **Playwright** (Chromium headless) | Scraping des plateformes dynamiques |
 | **Groq Cloud** — `openai/gpt-oss-120b` | Analyse IA initiale (rapide, sortie JSON forcée) |
 | **Mistral La Plateforme** — `mistral-small-latest` | Relecture critique et correction (fournisseur indépendant) |
-| **ChromaDB** (persistant, un par groupe) | Mémoire vectorielle RAG des verdicts passés |
+| **ChromaDB** (persistant, un par groupe, embedding ONNX intégré) | Mémoire vectorielle RAG des verdicts passés |
 | **pandas + openpyxl** | Tableaux de bord Excel (par groupe + Master fusionné) |
 | **python-dotenv** | Gestion des secrets locaux (`.env`) |
+| **pytest** | Tests unitaires (filtres, notes, pipeline, fusion) |
 | **GitHub Actions** | CI/CD : matrix parallèle, cache, artefacts |
 | **dawidd6/action-send-mail** | Notification e-mail de fin de pipeline |
 | **Discord Webhook** | Alertes temps réel |

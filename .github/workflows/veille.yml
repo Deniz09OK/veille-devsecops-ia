@@ -2,7 +2,7 @@ name: Veille DevSecOps
 
 on:
   schedule:
-    - cron: '0 6 * * *'  # 8h heure de Paris (UTC+2)
+    - cron: '0 6 * * *'
   workflow_dispatch: {}
 
 concurrency:
@@ -31,15 +31,34 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: pip
 
       - name: Installer les dépendances Python
-        run: |
-          pip install --upgrade pip
-          # Ollama est supprimé. Ajout de groq et sentence-transformers (pour ChromaDB)
-          pip install requests playwright python-dotenv chromadb pandas openpyxl groq sentence-transformers mistralai
+        run: pip install -r requirements.txt
 
-      - name: Installer Chromium (Playwright)
-        run: playwright install --with-deps chromium
+      - name: Lire la version de Playwright installée
+        id: playwright
+        run: echo "version=$(python -c 'import playwright; print(playwright.__version__)')" >> "$GITHUB_OUTPUT"
+
+      - name: Restaurer le cache Chromium (Playwright)
+        id: cache-chromium
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: chromium-${{ runner.os }}-playwright-${{ steps.playwright.outputs.version }}
+
+      - name: Télécharger Chromium (si absent du cache)
+        if: steps.cache-chromium.outputs.cache-hit != 'true'
+        run: playwright install chromium
+
+      - name: Installer les dépendances système de Chromium
+        run: playwright install-deps chromium
+
+      - name: Restaurer le modèle d'embedding ChromaDB
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/chroma
+          key: chroma-onnx-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
 
       - name: Restaurer l'état de la veille (mémoire IA, historique, Excel)
         uses: actions/cache/restore@v4
@@ -77,6 +96,7 @@ jobs:
           key: v2-etat-veille-${{ matrix.groupe_id }}-${{ github.run_id }}
 
       - name: Uploader les résultats du groupe
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: veille-devsecops-${{ matrix.groupe_id }}-${{ github.run_id }}
@@ -91,8 +111,11 @@ jobs:
     needs: veille
     if: always()
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 15
     steps:
+      - name: Checkout du dépôt
+        uses: actions/checkout@v4
+
       - name: Télécharger les résultats des 3 groupes
         uses: actions/download-artifact@v4
         with:
@@ -104,45 +127,14 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: pip
 
-      - name: Installer les dépendances Python
+      - name: Installer les dépendances de fusion
         run: pip install pandas openpyxl
 
       - name: Fusionner les Excel des 3 groupes
-        run: |
-          python - <<'EOF'
-          import glob
-          import pandas as pd
-          from openpyxl.formatting.rule import FormulaRule
-          from openpyxl.styles import PatternFill
-          from openpyxl.utils import get_column_letter
-
-          # Doit rester synchronisé avec SEUIL_CANDIDATURE (core/config.py) et
-          # _colorer_score_technique (sortie/rapport_excel.py) : ce script tourne
-          # dans un job séparé sans checkout du repo, donc pas d'import possible.
-          SEUIL_CANDIDATURE = 8.0
-
-          fichiers = glob.glob("resultats-bruts/**/suivi_candidatures_*.xlsx", recursive=True)
-          if fichiers:
-              dfs = [pd.read_excel(f, engine="openpyxl") for f in fichiers]
-              df_final = pd.concat(dfs, ignore_index=True)
-              if "Lien de l'offre" in df_final.columns:
-                  df_final = df_final.drop_duplicates(subset=["Lien de l'offre"])
-              with pd.ExcelWriter("suivi_candidatures_MASTER.xlsx", engine="openpyxl") as writer:
-                  df_final.to_excel(writer, index=False, sheet_name="Suivi")
-                  if not df_final.empty and "Score Technique" in df_final.columns:
-                      feuille = writer.sheets["Suivi"]
-                      colonne = get_column_letter(df_final.columns.get_loc("Score Technique") + 1)
-                      plage = f"{colonne}2:{colonne}{len(df_final) + 1}"
-                      valeur = f'VALUE(LEFT({colonne}2,FIND("/",{colonne}2)-1))'
-                      vert = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-                      orange = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
-                      rouge = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
-                      feuille.conditional_formatting.add(plage, FormulaRule(formula=[f"{valeur}>={SEUIL_CANDIDATURE}"], fill=vert, stopIfTrue=True))
-                      feuille.conditional_formatting.add(plage, FormulaRule(formula=[f"AND({valeur}>=5,{valeur}<{SEUIL_CANDIDATURE})"], fill=orange, stopIfTrue=True))
-                      feuille.conditional_formatting.add(plage, FormulaRule(formula=[f"{valeur}<5"], fill=rouge, stopIfTrue=True))
-              print(f"✅ Fusion terminée : {len(df_final)} offre(s) au total.")
-          EOF
+        id: stats
+        run: python -m veille.fusion resultats-bruts suivi_candidatures_MASTER.xlsx
 
       - name: Uploader l'Excel Master
         uses: actions/upload-artifact@v4
@@ -153,31 +145,6 @@ jobs:
             resultats-bruts
           retention-days: 30
           if-no-files-found: warn
-
-      - name: Extraire le résumé pour l'e-mail
-        id: stats
-        run: |
-          python - <<'EOF' >> "$GITHUB_OUTPUT"
-          import pandas as pd
-          def note_numerique(valeur):
-              try:
-                  return float(str(valeur).replace(',', '.').split('/')[0].strip())
-              except Exception:
-                  return -1.0
-          try:
-              df = pd.read_excel("suivi_candidatures_MASTER.xlsx", engine="openpyxl")
-              total = len(df)
-              if total > 0 and "Score Technique" in df.columns:
-                  df["_note"] = df["Score Technique"].apply(note_numerique)
-                  meilleure = df.sort_values("_note", ascending=False).iloc[0]
-                  resume = f"{meilleure.get('Titre du Poste', '?')} chez {meilleure.get('Entreprise', '?')} ({meilleure.get('Score Technique', '?')})"
-              else:
-                  resume = "Aucune offre validée aujourd'hui"
-          except Exception:
-              total = 0
-              resume = "Fichier Master indisponible (voir logs du run)"
-          print(f"total={total}\nresume={resume}")
-          EOF
 
       - name: Envoyer l'e-mail de fin de pipeline
         uses: dawidd6/action-send-mail@v3

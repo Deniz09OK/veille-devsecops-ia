@@ -1,6 +1,7 @@
 import urllib.parse
 
-from ..core.config import MOTS_CLES, LOCALISATION
+from ..core.config import MOTS_CLES
+from ..core.constantes import LOCALISATION
 
 SOURCES_TEMPLATES = [
     {

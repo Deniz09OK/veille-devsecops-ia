@@ -1,12 +1,15 @@
 import urllib.parse
+
 import requests
 
 from ..core.config import FT_CLIENT_ID, FT_CLIENT_SECRET
 
+URL_TOKEN = "https://entreprise.francetravail.fr/connexion/oauth2/access_token?realm=%2Fpartenaire"
+URL_RECHERCHE = "https://api.francetravail.io/partenaire/offresdemploi/v2/offres/search"
+TIMEOUT = 20
+
 
 def obtenir_token_france_travail():
-    url_token = "https://entreprise.francetravail.fr/connexion/oauth2/access_token?realm=%2Fpartenaire"
-    headers_token = {"Content-Type": "application/x-www-form-urlencoded"}
     scopes_a_essayer = [
         "api_offresdemploiv2 o2dsoffre",
         f"application_{FT_CLIENT_ID} api_offresdemploiv2 o2dsoffre",
@@ -18,9 +21,14 @@ def obtenir_token_france_travail():
             "client_secret": FT_CLIENT_SECRET,
             "scope": scope,
         }
-        req_token = requests.post(url_token, headers=headers_token, data=data_token)
-        if req_token.status_code == 200:
-            return req_token.json().get("access_token")
+        try:
+            reponse = requests.post(URL_TOKEN, data=data_token, timeout=TIMEOUT)
+        except requests.RequestException as e:
+            print(f"   ⚠️ France Travail : impossible d'obtenir un token ({e})")
+            return None
+        if reponse.status_code == 200:
+            return reponse.json().get("access_token")
+    print("   ⚠️ France Travail : authentification refusée, vérifier FT_CLIENT_ID / FT_CLIENT_SECRET.")
     return None
 
 
@@ -28,8 +36,8 @@ def generer_recherches_ft(mots_cles):
     recherches = []
     for mot in mots_cles:
         mot_encode = urllib.parse.quote_plus(mot)
-        recherches.append((f"Apprentissage {mot} - Nancy 30 km", f"motsCles={mot_encode}&commune=54395&distance=30&natureContrat=E2"))
-        recherches.append((f"Apprentissage {mot} - France entière", f"motsCles={mot_encode}&natureContrat=E2"))
+        recherches.append((f"Apprentissage {mot} - Nancy 30 km", f"motsCles={mot_encode}&commune=54395&distance=30&natureContrat=E2&range=0-149"))
+        recherches.append((f"Apprentissage {mot} - France entière", f"motsCles={mot_encode}&natureContrat=E2&range=0-149"))
     return recherches
 
 
@@ -40,15 +48,16 @@ def recuperer_offres_france_travail(recherches_ft):
     token = obtenir_token_france_travail()
     if not token:
         return []
-    base_url = "https://api.francetravail.io/partenaire/offresdemploi/v2/offres/search"
     headers_api = {"Authorization": f"Bearer {token}"}
     offres_uniques = {}
     for nom_recherche, params in recherches_ft:
         try:
-            req_offres = requests.get(f"{base_url}?{params}", headers=headers_api)
-            if req_offres.status_code in [200, 206]:
-                for offre in req_offres.json().get("resultats", []):
+            reponse = requests.get(f"{URL_RECHERCHE}?{params}", headers=headers_api, timeout=TIMEOUT)
+            if reponse.status_code in (200, 206):
+                for offre in reponse.json().get("resultats", []):
                     offres_uniques[offre.get("id")] = offre
-        except Exception:
-            pass
+            elif reponse.status_code != 204:
+                print(f"   ⚠️ France Travail ({nom_recherche}) : HTTP {reponse.status_code}")
+        except (requests.RequestException, ValueError) as e:
+            print(f"   ⚠️ Erreur France Travail ({nom_recherche}) : {e}")
     return list(offres_uniques.values())

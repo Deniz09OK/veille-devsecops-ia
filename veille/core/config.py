@@ -1,80 +1,67 @@
 import os
-import chromadb
 from datetime import datetime
+from functools import lru_cache
+
 from dotenv import load_dotenv
-from groq import Groq
+
+from .constantes import MOTS_CLES_COMPLETS, NOM_COLLECTION_RAG
 
 load_dotenv()
 
-WEBHOOK_DISCORD = (os.getenv("WEBHOOK_DISCORD") or "").strip()
-FT_CLIENT_ID = (os.getenv("FT_CLIENT_ID") or "").strip()
-FT_CLIENT_SECRET = (os.getenv("FT_CLIENT_SECRET") or "").strip()
-LBA_API_KEY = (os.getenv("LBA_API_KEY") or "").strip()
-GROQ_API_KEY = (os.environ.get("GROQ_API_KEY") or "").strip()
-MISTRAL_API_KEY = (os.environ.get("MISTRAL_API_KEY") or "").strip()
 
-client_ia = Groq(api_key=GROQ_API_KEY, max_retries=3)
+def _variable(nom):
+    return (os.getenv(nom) or "").strip()
 
-GROUPE_ID = (os.getenv("GROUPE_ID") or "default").strip()
 
-_REPO_BASE = "https://github.com/Deniz09OK/veille-devsecops-ia/blob/main/cv"
-CV_PAR_GROUPE = {
-    "secu": {
-        "design": f"{_REPO_BASE}/CV_Deniz_OK_secu.pdf",
-        "ats": f"{_REPO_BASE}/CV_Deniz_OK_ATS_secu.pdf",
-    },
-    "cloud-devops": {
-        "design": f"{_REPO_BASE}/CV_Deniz_OK_cloud-devops.pdf",
-        "ats": f"{_REPO_BASE}/CV_Deniz_OK_ATS_cloud-devops.pdf",
-    },
-    "infra-sre": {
-        "design": f"{_REPO_BASE}/CV_Deniz_OK_infra-sre.pdf",
-        "ats": f"{_REPO_BASE}/CV_Deniz_OK_ATS_infra-sre.pdf",
-    },
-}
-FICHIER_HISTORIQUE = f"historique_offres_{GROUPE_ID}.json" if GROUPE_ID != "default" else "historique_offres.json"
-JOURS_MEMOIRE = 14
-MAX_ANALYSES_PAR_RUN = 15
-MODELE_IA = "openai/gpt-oss-120b"
-MODELE_IA_VALIDATION = "mistral-small-latest"
-SEUIL_CANDIDATURE = 8.0
+WEBHOOK_DISCORD = _variable("WEBHOOK_DISCORD")
+FT_CLIENT_ID = _variable("FT_CLIENT_ID")
+FT_CLIENT_SECRET = _variable("FT_CLIENT_SECRET")
+LBA_API_KEY = _variable("LBA_API_KEY")
+GROQ_API_KEY = _variable("GROQ_API_KEY")
+MISTRAL_API_KEY = _variable("MISTRAL_API_KEY")
 
-PROFIL_CANDIDAT = """
-- Sécurité : Metasploit, Burp Suite, Nmap, Hydra, Wireshark, John the Ripper, Gobuster, Kali Linux.
-- DevOps/Infra : Docker, Kubernetes, Jenkins, GitLab CI/CD, Traefik, Linux, Windows.
-- Réseau : Configuration routeurs et switches.
-- Dev/Design : Vite, Figma, Tailwind CSS.
-""".strip()
+GROUPE_ID = _variable("GROUPE_ID") or "default"
 
-nom_dossier_jour = datetime.now().strftime("%Y%m%d")
-chemin_archivage = os.path.join("Historique", nom_dossier_jour, GROUPE_ID) if GROUPE_ID != "default" else os.path.join("Historique", nom_dossier_jour)
-os.makedirs(chemin_archivage, exist_ok=True)
-FICHIER_RAPPORT = os.path.join(chemin_archivage, "rapport_alternances.md")
 
-chemin_memoire_ia = f"./memoire_ia_{GROUPE_ID}" if GROUPE_ID != "default" else "./memoire_ia"
-client_chroma = chromadb.PersistentClient(path=chemin_memoire_ia)
-collection_ia = client_chroma.get_or_create_collection(name="memoire_devsecops_v2")
+def _nom_par_groupe(base, extension=""):
+    if GROUPE_ID == "default":
+        return f"{base}{extension}"
+    return f"{base}_{GROUPE_ID}{extension}"
 
-MOTS_CLES_COMPLETS = [
-    "SecOps", "Cloud Security Engineer", "Ingénieur SecOps", "Architecte Sécurité Cloud", "Consultant Sécurité Cloud",
-    "DevSecOps", "DevOps", "Site Reliability Engineer (SRE)", "Ingénieur Cloud", "Cloud Builder",
-    "Ingénieur DevOps", "Ingénieur Système et Réseau", "Ingénieur de Production IT et Release Engineer",
-]
 
-_filtre_env = os.getenv("MOTS_CLES_GROUPE")
-if _filtre_env:
-    _mots_demandes = [m.strip() for m in _filtre_env.split(",") if m.strip()]
-    MOTS_CLES = [m for m in MOTS_CLES_COMPLETS if m in _mots_demandes]
-else:
-    MOTS_CLES = MOTS_CLES_COMPLETS
+FICHIER_HISTORIQUE = _nom_par_groupe("historique_offres", ".json")
+FICHIER_EXCEL = _nom_par_groupe("suivi_candidatures", ".xlsx")
+CHEMIN_MEMOIRE_IA = _nom_par_groupe("./memoire_ia")
 
-ROME_PAR_GROUPE = {
-    "secu": ["M1802"],
-    "cloud-devops": ["M1801"],
-    "infra-sre": ["M1810"],
-}
-ROME_PAR_DEFAUT = ["M1801", "M1802", "M1810"]
+_dossier_jour = os.path.join("Historique", datetime.now().strftime("%Y%m%d"))
+CHEMIN_ARCHIVAGE = _dossier_jour if GROUPE_ID == "default" else os.path.join(_dossier_jour, GROUPE_ID)
+FICHIER_RAPPORT = os.path.join(CHEMIN_ARCHIVAGE, "rapport_alternances.md")
 
-LOCALISATION = "Nancy"
 
-FICHIER_EXCEL = f"suivi_candidatures_{GROUPE_ID}.xlsx" if GROUPE_ID != "default" else "suivi_candidatures.xlsx"
+def _selectionner_mots_cles():
+    demande = _variable("MOTS_CLES_GROUPE")
+    if not demande:
+        return list(MOTS_CLES_COMPLETS)
+    demandes = [m.strip() for m in demande.split(",") if m.strip()]
+    inconnus = [m for m in demandes if m not in MOTS_CLES_COMPLETS]
+    if inconnus:
+        print(f"⚠️ Mots-clés ignorés car absents de MOTS_CLES_COMPLETS : {', '.join(inconnus)}")
+    return [m for m in MOTS_CLES_COMPLETS if m in demandes]
+
+
+MOTS_CLES = _selectionner_mots_cles()
+
+
+@lru_cache(maxsize=None)
+def client_groq():
+    from groq import Groq
+
+    return Groq(api_key=GROQ_API_KEY, max_retries=3)
+
+
+@lru_cache(maxsize=None)
+def collection_memoire():
+    import chromadb
+
+    client = chromadb.PersistentClient(path=CHEMIN_MEMOIRE_IA)
+    return client.get_or_create_collection(name=NOM_COLLECTION_RAG)

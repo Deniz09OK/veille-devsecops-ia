@@ -1,8 +1,21 @@
 import re
+import sys
 import urllib.parse
 from difflib import SequenceMatcher
 
+
+def activer_console_utf8():
+    for flux in (sys.stdout, sys.stderr):
+        if hasattr(flux, "reconfigure"):
+            try:
+                flux.reconfigure(encoding="utf-8", errors="replace")
+            except (ValueError, OSError):
+                pass
+
 SEUIL_SIMILARITE_DEDUP = 0.85
+
+_MOTIF_NOTE_SUR_10 = re.compile(r"(\d{1,2}(?:\.\d+)?)\s*/\s*10")
+_MOTIF_NOMBRE = re.compile(r"\d{1,2}(?:\.\d+)?")
 
 
 def normaliser_url_offre(url: str) -> str:
@@ -46,24 +59,29 @@ def normaliser_champ(valeur):
     return str(valeur).strip()
 
 
+def _note_brute(champ):
+    texte = normaliser_champ(champ).replace(",", ".")
+    match = _MOTIF_NOTE_SUR_10.search(texte)
+    if match:
+        return float(match.group(1))
+    match = _MOTIF_NOMBRE.search(texte)
+    if match:
+        return float(match.group(0))
+    return None
+
+
 def extraire_note(champ):
-    texte = normaliser_champ(champ).replace(',', '.')
-    chiffres = "".join(c for c in texte if c.isdigit() or c in ['.', '/'])
-    try:
-        return float(chiffres.split('/')[0])
-    except Exception:
+    note = _note_brute(champ)
+    if note is None:
         return 0.0
+    return min(max(note, 0.0), 10.0)
 
 
 def valider_match_tech(valeur):
-    texte = normaliser_champ(valeur)
-    try:
-        float(texte.split('/')[0].strip().replace(',', '.'))
-        if "/10" not in texte:
-            texte += "/10"
-        return texte
-    except ValueError:
+    note = _note_brute(valeur)
+    if note is None:
         return "5/10"
+    return f"{min(max(note, 0.0), 10.0):g}/10"
 
 
 def comparer_scores(score_initial, score_final):
