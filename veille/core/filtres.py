@@ -56,6 +56,9 @@ SIGNAUX_SECTEUR_PUBLIC = [_sans_accents(s) for s in [
     "ministère", "préfecture", "commissariat", "centre hospitalier",
     "cadre d'emplois", "contrat pacte",
     "gendarmerie", "service départemental d'incendie",
+    "service infrastructure de la défense", "ministère des armées",
+    "armée de terre", "armée de l'air", "marine nationale",
+    "direction générale de l'armement",
 ]]
 
 
