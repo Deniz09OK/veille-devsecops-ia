@@ -63,12 +63,18 @@ def extraire_liens(page, config):
     return liens_propres
 
 
+_SIGNAUX_OFFRE_EXPIREE = ["n'est plus disponible", "offre n'est plus en ligne", "offre a expiré", "offre pourvue"]
+
+
 def lire_texte_offre(contexte, url):
     page_offre = contexte.new_page()
     try:
         page_offre.goto(url, timeout=20000)
         page_offre.wait_for_load_state("domcontentloaded")
-        return page_offre.locator("body").inner_text(timeout=10000)
+        texte = page_offre.locator("body").inner_text(timeout=10000)
+        if texte and any(signal in texte.lower() for signal in _SIGNAUX_OFFRE_EXPIREE):
+            return None
+        return texte
     except Exception:
         return None
     finally:

@@ -1,3 +1,10 @@
+import unicodedata
+
+
+def _sans_accents(texte):
+    return "".join(c for c in unicodedata.normalize("NFKD", texte) if not unicodedata.combining(c))
+
+
 VILLES_TER_NANCY = {
     "metz": ("570", "57000"), "thionville": ("571", "57100"), "sarrebourg": ("574", "57400"),
     "bar-le-duc": ("550", "55000"), "épinal": ("880", "88000"), "epinal": ("880", "88000"),
@@ -40,18 +47,20 @@ def filtre_type_contrat(texte_brut):
     return any(mot in texte for mot in mots_alternance)
 
 
+SIGNAUX_SECTEUR_PUBLIC = [_sans_accents(s) for s in [
+    "fonctionnaire", "fonction publique", "collectivité territoriale", "collectivités territoriales",
+    "collectivité locale", "collectivités locales", "établissement public", "établissements publics",
+    "conseil départemental", "conseil régional",
+    "métropole du grand", "métropole de", "communauté de communes",
+    "communauté d'agglomération", "communauté urbaine", "mairie de",
+    "ministère", "préfecture", "commissariat", "centre hospitalier",
+    "cadre d'emplois", "contrat pacte",
+    "gendarmerie", "service départemental d'incendie",
+]]
+
+
 def filtre_secteur_public(texte_brut):
     if not texte_brut:
         return True
-    texte = texte_brut.lower()
-    signaux_public = [
-        "fonctionnaire", "fonction publique", "collectivité territoriale", "collectivités territoriales",
-        "collectivité locale", "collectivités locales", "établissement public", "établissements publics",
-        "conseil départemental", "conseil régional",
-        "métropole du grand", "métropole de", "communauté de communes",
-        "communauté d'agglomération", "communauté urbaine", "mairie de",
-        "ministère", "préfecture", "commissariat", "centre hospitalier",
-        "cadre d'emplois", "contrat pacte",
-        "gendarmerie", "service départemental d'incendie",
-    ]
-    return not any(s in texte for s in signaux_public)
+    texte = _sans_accents(texte_brut.lower())
+    return not any(s in texte for s in SIGNAUX_SECTEUR_PUBLIC)
