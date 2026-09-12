@@ -6,6 +6,7 @@ from openpyxl.styles import PatternFill
 from openpyxl.utils import get_column_letter
 
 from ..core.config import FICHIER_RAPPORT, FICHIER_EXCEL, GROUPE_ID, CV_PAR_GROUPE, MODELE_IA, MODELE_IA_VALIDATION, SEUIL_CANDIDATURE
+from ..core.filtres import filtre_secteur_public
 from ..core.utils import normaliser_champ
 
 
@@ -47,6 +48,17 @@ def _colorer_score_technique(feuille, df):
     feuille.conditional_formatting.add(plage, FormulaRule(formula=[f"{valeur}<5"], fill=rouge, stopIfTrue=True))
 
 
+def _revalider_lignes_existantes(df):
+    if df.empty:
+        return df
+    colonnes = [c for c in ["Entreprise", "Titre du Poste", "Verdict IA"] if c in df.columns]
+    if not colonnes:
+        return df
+    texte_verif = df[colonnes].astype(str).agg(" ".join, axis=1)
+    conserver = texte_verif.apply(filtre_secteur_public)
+    return df[conserver].reset_index(drop=True)
+
+
 def generer_excel(offres_triees):
     print("📊 Mise à jour du fichier Excel...")
 
@@ -73,20 +85,28 @@ def generer_excel(offres_triees):
             "Notes perso": "",
         })
 
-    if donnees_excel:
-        df_nouveau = pd.DataFrame(donnees_excel)
-        if os.path.exists(FICHIER_EXCEL):
-            try:
-                df_ancien = pd.read_excel(FICHIER_EXCEL, engine='openpyxl')
-                df_nouveau = df_nouveau[~df_nouveau["Lien de l'offre"].isin(df_ancien["Lien de l'offre"].values)]
-                df_final = pd.concat([df_ancien, df_nouveau], ignore_index=True)
-            except Exception:
-                df_final = df_nouveau
-        else:
-            df_final = df_nouveau
+    df_nouveau = pd.DataFrame(donnees_excel)
+
+    df_ancien = pd.DataFrame()
+    if os.path.exists(FICHIER_EXCEL):
+        try:
+            df_ancien = pd.read_excel(FICHIER_EXCEL, engine='openpyxl')
+            nb_avant = len(df_ancien)
+            df_ancien = _revalider_lignes_existantes(df_ancien)
+            if len(df_ancien) < nb_avant:
+                print(f"🧹 {nb_avant - len(df_ancien)} ancienne(s) offre(s) retirée(s) rétroactivement (secteur public).")
+        except Exception:
+            df_ancien = pd.DataFrame()
+
+    if not df_nouveau.empty and not df_ancien.empty:
+        df_nouveau = df_nouveau[~df_nouveau["Lien de l'offre"].isin(df_ancien["Lien de l'offre"].values)]
+
+    df_final = pd.concat([df_ancien, df_nouveau], ignore_index=True)
+
+    if not df_final.empty:
         with pd.ExcelWriter(FICHIER_EXCEL, engine="openpyxl") as writer:
             df_final.to_excel(writer, index=False, sheet_name="Suivi")
             _colorer_score_technique(writer.sheets["Suivi"], df_final)
         print(f"✅ Excel mis à jour : {len(donnees_excel)} nouvelle(s) offre(s) traitée(s).")
     else:
-        print("⚠️ Aucune nouvelle donnée à traiter pour l'Excel aujourd'hui.")
+        print("⚠️ Aucune donnée à écrire dans l'Excel aujourd'hui.")
