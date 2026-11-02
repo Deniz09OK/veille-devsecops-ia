@@ -2,6 +2,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 
+from .bilan import Bilan
 from .core.constantes import MAX_ANALYSES_PAR_RUN, PAUSE_ENTRE_ANALYSES, SEUIL_CANDIDATURE
 from .core.filtres import filtre_ecole_concurrente, filtre_logistique, filtre_secteur_public, filtre_type_contrat
 from .core.utils import extraire_note, normaliser_champ, normaliser_texte_dedup, offre_deja_analysee
@@ -16,6 +17,7 @@ class OffreCandidate:
     texte_ia: str
     texte_verif: str = ""
     nom_entreprise: str = ""
+    site: str = ""
     logistique_validee: bool = False
     verifier_contrat: bool = False
 
@@ -25,21 +27,28 @@ class OffreCandidate:
             self.texte_verif = self.texte_ia
 
 
-def passe_les_filtres(offre):
+def motif_rejet(offre):
     if not offre.texte_ia.strip():
-        return False
+        return "texte_vide"
     if not filtre_ecole_concurrente(offre.texte_verif):
-        return False
+        return "ecole"
     if not (offre.logistique_validee or filtre_logistique(offre.texte_verif)):
-        return False
+        return "logistique"
     if offre.verifier_contrat and not filtre_type_contrat(offre.texte_verif):
-        return False
-    return filtre_secteur_public(offre.texte_verif)
+        return "contrat"
+    if not filtre_secteur_public(offre.texte_verif):
+        return "secteur_public"
+    return None
+
+
+def passe_les_filtres(offre):
+    return motif_rejet(offre) is None
 
 
 class Pipeline:
-    def __init__(self, historique, quota=MAX_ANALYSES_PAR_RUN, pause=PAUSE_ENTRE_ANALYSES):
+    def __init__(self, historique, quota=MAX_ANALYSES_PAR_RUN, pause=PAUSE_ENTRE_ANALYSES, bilan=None):
         self.historique = historique
+        self.bilan = bilan if bilan is not None else Bilan()
         self.offres = {}
         self.nb_analyses = 0
         self.nb_filtrees = 0
@@ -59,15 +68,24 @@ class Pipeline:
             self.offres[cle]["liens"].append(url)
 
     def traiter(self, offre):
-        if not offre.url or offre.url in self.historique:
+        site = offre.site or offre.source
+        self.bilan.compter(site, "collectees")
+        if not offre.url:
+            self.bilan.compter(site, "sans_url")
             return
-        if not passe_les_filtres(offre):
+        if offre.url in self.historique:
+            self.bilan.compter(site, "deja_vues")
+            return
+        motif = motif_rejet(offre)
+        if motif:
             self.nb_filtrees += 1
+            self.bilan.compter(site, motif)
             self._marquer_vue(offre.url)
             return
 
         index_doublon = offre_deja_analysee(offre.texte_ia, self._textes_vus)
         if index_doublon is not None:
+            self.bilan.compter(site, "doublons")
             self._rattacher_lien(self._cles_par_texte[index_doublon], offre.url)
             self._marquer_vue(offre.url)
             return
@@ -77,9 +95,11 @@ class Pipeline:
         analyse = analyser_technique_ia(offre.texte_ia, offre.url)
         if not analyse or "titre_poste" not in analyse:
             print(f"   ⚠️ Analyse impossible, l'offre sera retentée au prochain run : {offre.url}")
+            self.bilan.compter(site, "analyse_echec")
             return
 
         self.nb_analyses += 1
+        self.bilan.compter(site, "analysees")
         if offre.nom_entreprise:
             analyse["nom_entreprise"] = offre.nom_entreprise
         titre = normaliser_champ(analyse.get("titre_poste", "Poste Inconnu"))
@@ -103,6 +123,7 @@ class Pipeline:
         for offre in offres:
             if self.quota_atteint():
                 print(f"🛑 Quota de {self.quota} analyses atteint, arrêt anticipé ({nom_source}).")
+                self.bilan.noter(f"Quota de {self.quota} analyses atteint pendant « {nom_source} » : la suite n'a pas été traitée.")
                 return
             self.traiter(offre)
 

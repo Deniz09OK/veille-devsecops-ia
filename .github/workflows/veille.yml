@@ -146,6 +146,7 @@ jobs:
           name: veille-devsecops-${{ matrix.groupe_id }}-${{ github.run_id }}
           path: |
             suivi_candidatures_${{ matrix.groupe_id }}.xlsx
+            bilan_run_${{ matrix.groupe_id }}.json
             Historique
             debug_screenshots
           retention-days: 30
@@ -202,7 +203,11 @@ jobs:
           subject: ${{ needs.veille.result == 'success' && '✅ Veille DevSecOps - Run terminé' || '⚠️ Veille DevSecOps - Run terminé avec erreurs' }}
           body: |
             Résultat des 3 groupes (secu / cloud-devops / infra-sre) : ${{ needs.veille.result }}
-            Offres au total dans le Master : ${{ steps.stats.outputs.total }}
-            Meilleure offre du jour : ${{ steps.stats.outputs.resume }}
+            Offres au total dans le Master (cumul) : ${{ steps.stats.outputs.total }}
+            Meilleure offre du Master : ${{ steps.stats.outputs.resume }}
+
+            Entonnoir du run (où disparaissent les offres) :
+            ${{ steps.stats.outputs.bilan }}
+
             Détails : https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
           attachments: suivi_candidatures_MASTER.xlsx

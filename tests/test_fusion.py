@@ -2,7 +2,7 @@ import pandas as pd
 from openpyxl import load_workbook
 
 from veille.core.constantes import COL_ENTREPRISE, COL_LIEN, COL_SCORE, COL_SCORE_INITIAL, COL_TITRE, FICHIER_MASTER
-from veille.fusion import fusionner, lire_excels, main, resumer
+from veille.fusion import fusionner, lire_excels, main, publier_sortie_github, resumer, resumer_bilans
 
 
 def _ecrire(chemin, lignes):
@@ -35,7 +35,10 @@ def test_fusion_deduplique_trie_et_renomme(tmp_path, monkeypatch):
     monkeypatch.setenv("GITHUB_OUTPUT", str(sortie))
     destination = tmp_path / "master.xlsx"
     assert main(["fusion", str(dossier), str(destination)]) == 0
-    assert "total=2\nresume=SecOps chez ACME (7/10)\n" == sortie.read_text(encoding="utf-8")
+    assert sortie.read_text(encoding="utf-8") == (
+        "total=2\nresume=SecOps chez ACME (7/10)\n"
+        "bilan<<EOF_BILAN\nBilan indisponible (voir les logs des groupes)\nEOF_BILAN\n"
+    )
 
     feuille = load_workbook(destination)["Suivi"]
     assert feuille.freeze_panes == "A2"
@@ -95,3 +98,35 @@ def test_fusion_sans_github_output(tmp_path, monkeypatch, capsys):
     assert main(["fusion", str(tmp_path), str(tmp_path / "master.xlsx")]) == 0
     assert (tmp_path / "master.xlsx").exists()
     assert "1 offre(s) au total" in capsys.readouterr().out
+
+
+def test_resumer_bilans_lit_les_json_de_chaque_groupe(tmp_path, capsys):
+    import json
+
+    (tmp_path / "a").mkdir()
+    (tmp_path / "a" / "bilan_run_secu.json").write_text(json.dumps({
+        "groupe": "secu", "retenues": 0, "notes": ["Quota atteint"],
+        "sources": {"France Travail": {"collectees": 10, "logistique": 9, "deja_vues": 1}, "HelloWork": {"recherches": 3, "recherches_vides": 3}},
+    }), encoding="utf-8")
+    (tmp_path / "bilan_run_casse.json").write_text("pas du json", encoding="utf-8")
+
+    texte = resumer_bilans(str(tmp_path))
+
+    assert "Groupe secu : 0 nouvelle(s) offre(s) retenue(s)" in texte
+    assert "- France Travail : 10 collectée(s), 1 déjà vue(s), 9 hors zone / sans télétravail intégral" in texte
+    assert "- HelloWork : 3 recherche(s) dont 3 sans résultat, aucune offre collectée" in texte
+    assert "⚠️ Quota atteint" in texte
+    assert "Bilan ignoré" in capsys.readouterr().out
+
+
+def test_resumer_bilans_sans_fichier(tmp_path):
+    assert resumer_bilans(str(tmp_path)) == "Bilan indisponible (voir les logs des groupes)"
+
+
+def test_publier_sortie_github_ecrit_le_bilan_multiligne(tmp_path, monkeypatch):
+    sortie = tmp_path / "output.txt"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(sortie))
+
+    publier_sortie_github(3, "Meilleure", "ligne 1\nligne 2")
+
+    assert sortie.read_text(encoding="utf-8") == "total=3\nresume=Meilleure\nbilan<<EOF_BILAN\nligne 1\nligne 2\nEOF_BILAN\n"
