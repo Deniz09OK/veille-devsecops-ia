@@ -81,7 +81,7 @@ def test_recuperer_offres_ft_deduplique_et_tolere_les_erreurs(monkeypatch, ident
 def test_generer_recherches_lba_par_groupe(monkeypatch):
     monkeypatch.setattr(lba, "GROUPE_ID", "secu")
     recherches = lba.generer_recherches_lba()
-    assert recherches[0] == ("locale", {"romes": "M1802", "departements": ["54", "57", "55", "88"]})
+    assert recherches[0] == ("locale", {"romes": "M1802", "latitude": lba.NANCY_LATITUDE, "longitude": lba.NANCY_LONGITUDE, "radius": lba.RAYON_LOCAL_KM})
     assert recherches[1] == ("nationale", {"romes": "M1802"})
 
     monkeypatch.setattr(lba, "GROUPE_ID", "inconnu")

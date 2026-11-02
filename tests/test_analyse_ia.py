@@ -68,7 +68,7 @@ def test_analyse_complete_memorise_et_trace_l_ajustement(monkeypatch, memoire):
 def test_retry_sur_rate_limit_groq_puis_mistral(monkeypatch, memoire):
     installer_fournisseurs(
         monkeypatch,
-        [erreur_rate_limit_groq(), ANALYSE, ANALYSE],
+        [erreur_rate_limit_groq(), ANALYSE],
         [reponse_mistral(ANALYSE, 429), reponse_mistral(ANALYSE)],
     )
     analyse = analyse_ia.analyser_technique_ia("texte", "https://offre")
@@ -85,9 +85,11 @@ def test_abandon_apres_trois_rate_limits(monkeypatch, memoire, capsys):
     assert memoire.documents == {}
 
 
-def test_erreur_mistral_autre_que_429_abandonne(monkeypatch, memoire, capsys):
+def test_erreur_mistral_autre_que_429_garde_l_analyse_groq(monkeypatch, memoire, capsys):
     installer_fournisseurs(monkeypatch, [ANALYSE], [reponse_mistral(ANALYSE, 500)])
-    assert analyse_ia.analyser_technique_ia("texte", "https://offre") is None
+    analyse = analyse_ia.analyser_technique_ia("texte", "https://offre")
+    assert analyse["match_tech"] == ANALYSE["match_tech"]
+    assert "Non relu" in analyse["ajustement_collaboratif"]
     assert "Erreur Mistral" in capsys.readouterr().out
 
 
@@ -202,19 +204,22 @@ def test_generer_candidature_en_echec(monkeypatch, memoire, capsys):
     assert "quota épuisé" in capsys.readouterr().out
 
 
-def test_abandon_mistral_indique_le_fournisseur_et_le_delai(monkeypatch, memoire, capsys):
+def test_mistral_en_limite_repli_sur_groq_et_indique_le_delai(monkeypatch, memoire, capsys):
     def limite():
         reponse = reponse_mistral(ANALYSE, 429)
         reponse.headers["Retry-After"] = "42"
         return reponse
 
-    installer_fournisseurs(monkeypatch, [ANALYSE] * 3, [limite(), limite(), limite()])
+    faux_groq, _ = installer_fournisseurs(monkeypatch, [ANALYSE], [limite(), limite(), limite()])
 
-    assert analyse_ia.analyser_technique_ia("texte", "https://offre") is None
+    analyse = analyse_ia.analyser_technique_ia("texte", "https://offre")
 
     sortie = capsys.readouterr().out
     assert "Mistral : limite de requêtes atteinte (Retry-After : 42s" in sortie
-    assert "Dernière erreur — Mistral" in sortie
+    assert "Relecture Mistral indisponible" in sortie
+    assert analyse["score_initial"] == analyse["match_tech"]
+    assert "Non relu" in analyse["ajustement_collaboratif"]
+    assert "https://offre" in memoire.documents
 
 
 def test_decrire_limite_sans_detail():

@@ -6,7 +6,10 @@ from ..core.constantes import ROME_PAR_DEFAUT, ROME_PAR_GROUPE
 BASE_URL = "https://api.apprentissage.beta.gouv.fr/api/job/v1/search"
 TIMEOUT = 15
 
-DEPARTEMENTS_ACCEPTES = ["54", "57", "55", "88"]
+# Nancy : l'API filtre par géolocalisation (latitude / longitude / rayon en km), pas par département.
+NANCY_LATITUDE = 48.6921
+NANCY_LONGITUDE = 6.1844
+RAYON_LOCAL_KM = 60
 
 
 def generer_recherches_lba():
@@ -15,7 +18,7 @@ def generer_recherches_lba():
         return []
     romes_str = ",".join(romes)
     return [
-        ("locale", {"romes": romes_str, "departements": DEPARTEMENTS_ACCEPTES}),
+        ("locale", {"romes": romes_str, "latitude": NANCY_LATITUDE, "longitude": NANCY_LONGITUDE, "radius": RAYON_LOCAL_KM}),
         ("nationale", {"romes": romes_str}),
     ]
 
@@ -35,7 +38,7 @@ def recuperer_offres_la_bonne_alternance(recherches):
         try:
             reponse = requests.get(BASE_URL, headers=headers, params=params, timeout=TIMEOUT)
             if reponse.status_code != 200:
-                print(f"   ⚠️ La Bonne Alternance ({nom_recherche}) : HTTP {reponse.status_code}")
+                print(f"   ⚠️ La Bonne Alternance ({nom_recherche}) : HTTP {reponse.status_code} — {(reponse.text or '')[:200]}")
                 continue
             corps = reponse.json()
             jobs = corps.get("jobs") if isinstance(corps, dict) else None
