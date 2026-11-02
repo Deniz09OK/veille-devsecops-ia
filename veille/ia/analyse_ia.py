@@ -147,7 +147,22 @@ def construire_prompt_relecture(texte_offre, contexte_memoire, analyse_initiale)
     )
 
 
+def decrire_limite(fournisseur, erreur):
+    reponse = getattr(erreur, "response", None)
+    details = []
+    if reponse is not None:
+        attente = reponse.headers.get("retry-after")
+        if attente:
+            details.append(f"Retry-After : {attente}s")
+        corps = (reponse.text or "").strip()
+        if corps:
+            details.append(corps[:200])
+    complement = f" ({' | '.join(details)})" if details else ""
+    return f"{fournisseur} : limite de requêtes atteinte{complement}"
+
+
 def analyser_technique_ia(texte_offre, url_offre):
+    derniere_limite = ""
     for _ in range(NB_TENTATIVES):
         try:
             contexte_memoire = rechercher_souvenir(texte_offre)
@@ -168,10 +183,14 @@ def analyser_technique_ia(texte_offre, url_offre):
             memoriser(url_offre, texte_offre, analyse_finale)
             return analyse_finale
 
-        except groq.RateLimitError:
+        except groq.RateLimitError as e:
+            derniere_limite = decrire_limite("Groq", e)
+            print(f"   ⏳ {derniere_limite}")
             time.sleep(PAUSE_RATE_LIMIT)
         except requests.exceptions.HTTPError as e:
             if e.response is not None and e.response.status_code == 429:
+                derniere_limite = decrire_limite("Mistral", e)
+                print(f"   ⏳ {derniere_limite}")
                 time.sleep(PAUSE_RATE_LIMIT)
                 continue
             print(f"   ⚠️ Erreur Mistral : {e}")
@@ -179,7 +198,7 @@ def analyser_technique_ia(texte_offre, url_offre):
         except Exception as e:
             print(f"   ⚠️ Erreur analyse IA : {e}")
             return None
-    print("   ⚠️ Analyse abandonnée après plusieurs erreurs de rate-limit.")
+    print(f"   ⚠️ Analyse abandonnée après plusieurs erreurs de rate-limit. Dernière erreur — {derniere_limite}")
     return None
 
 

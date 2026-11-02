@@ -44,9 +44,10 @@ def test_token_refuse_ou_reseau_en_panne(monkeypatch, identifiants_ft, capsys):
     assert "hors ligne" in capsys.readouterr().out
 
 
-def test_recuperer_offres_ft_sans_identifiants_ni_token(monkeypatch):
+def test_recuperer_offres_ft_sans_identifiants_ni_token(monkeypatch, capsys):
     monkeypatch.setattr(ft, "FT_CLIENT_ID", "")
     assert ft.recuperer_offres_france_travail([("x", "a=b")]) == []
+    assert "FT_CLIENT_ID absent" in capsys.readouterr().out
     monkeypatch.setattr(ft, "FT_CLIENT_ID", "VOTRE_CLIENT_ID_ICI")
     assert ft.recuperer_offres_france_travail([("x", "a=b")]) == []
     monkeypatch.setattr(ft, "FT_CLIENT_ID", "client-test")
@@ -73,6 +74,8 @@ def test_recuperer_offres_ft_deduplique_et_tolere_les_erreurs(monkeypatch, ident
     assert faux_get.appels[0][1]["headers"] == {"Authorization": "Bearer jeton"}
     sortie = capsys.readouterr().out
     assert "HTTP 500" in sortie and "trop long" in sortie and "HTTP 204" not in sortie
+    assert "recherche 0 : 2 offre(s)" in sortie and "recherche 2 : 0 offre(s)" in sortie
+    assert "2 offre(s) distincte(s) au total" in sortie
 
 
 def test_generer_recherches_lba_par_groupe(monkeypatch):
@@ -99,9 +102,22 @@ def test_offre_en_full_remote(offre, attendu):
     assert lba.offre_en_full_remote(offre) is attendu
 
 
-def test_recuperer_lba_sans_cle(monkeypatch):
+def test_recuperer_lba_sans_cle(monkeypatch, capsys):
     monkeypatch.setattr(lba, "LBA_API_KEY", "")
     assert lba.recuperer_offres_la_bonne_alternance([("locale", {})]) == []
+    assert "LBA_API_KEY absente ou vide" in capsys.readouterr().out
+
+
+def test_recuperer_lba_signale_une_reponse_sans_jobs(monkeypatch, capsys):
+    monkeypatch.setattr(lba, "LBA_API_KEY", "cle")
+    faux_get = FauxRequests([reponse_http(200, {"data": [], "total": 0}), reponse_http(200, [])])
+    monkeypatch.setattr(lba.requests, "get", faux_get)
+
+    assert lba.recuperer_offres_la_bonne_alternance([("locale", {}), ("nationale", {})]) == []
+
+    sortie = capsys.readouterr().out
+    assert "locale) : réponse sans clé « jobs » (reçu : ['data', 'total'])" in sortie
+    assert "nationale) : réponse sans clé « jobs » (reçu : list)" in sortie
 
 
 def test_recuperer_lba_filtre_le_remote_et_deduplique(monkeypatch, capsys):
@@ -130,6 +146,8 @@ def test_recuperer_lba_filtre_le_remote_et_deduplique(monkeypatch, capsys):
     assert faux_get.appels[0][1]["params"] == {"romes": "M1802"}
     sortie = capsys.readouterr().out
     assert "HTTP 403" in sortie and "panne" in sortie
+    assert "locale) : 3 offre(s) reçue(s), 2 conservée(s)" in sortie
+    assert "nationale) : 3 offre(s) reçue(s), 2 conservée(s)" in sortie
 
 
 def test_generer_sources_scraping():

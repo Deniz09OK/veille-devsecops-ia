@@ -44,6 +44,7 @@ def generer_recherches_ft(mots_cles):
 def recuperer_offres_france_travail(recherches_ft):
     print("🌍 Interrogation de l'API France Travail...")
     if not FT_CLIENT_ID or FT_CLIENT_ID == "VOTRE_CLIENT_ID_ICI":
+        print("   ⚠️ France Travail : FT_CLIENT_ID absent ou factice, étape ignorée (vérifier les secrets GitHub).")
         return []
     token = obtenir_token_france_travail()
     if not token:
@@ -54,10 +55,15 @@ def recuperer_offres_france_travail(recherches_ft):
         try:
             reponse = requests.get(f"{URL_RECHERCHE}?{params}", headers=headers_api, timeout=TIMEOUT)
             if reponse.status_code in (200, 206):
-                for offre in reponse.json().get("resultats", []):
+                resultats = reponse.json().get("resultats", [])
+                for offre in resultats:
                     offres_uniques[offre.get("id")] = offre
-            elif reponse.status_code != 204:
+                print(f"   ↳ {nom_recherche} : {len(resultats)} offre(s)")
+            elif reponse.status_code == 204:
+                print(f"   ↳ {nom_recherche} : 0 offre(s)")
+            else:
                 print(f"   ⚠️ France Travail ({nom_recherche}) : HTTP {reponse.status_code}")
         except (requests.RequestException, ValueError) as e:
             print(f"   ⚠️ Erreur France Travail ({nom_recherche}) : {e}")
+    print(f"   ✔️ France Travail : {len(offres_uniques)} offre(s) distincte(s) au total.")
     return list(offres_uniques.values())

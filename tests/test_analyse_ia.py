@@ -79,7 +79,9 @@ def test_retry_sur_rate_limit_groq_puis_mistral(monkeypatch, memoire):
 def test_abandon_apres_trois_rate_limits(monkeypatch, memoire, capsys):
     installer_fournisseurs(monkeypatch, [erreur_rate_limit_groq()] * 3, [])
     assert analyse_ia.analyser_technique_ia("texte", "https://offre") is None
-    assert "abandonnée" in capsys.readouterr().out
+    sortie = capsys.readouterr().out
+    assert "abandonnée" in sortie
+    assert "Groq : limite de requêtes atteinte" in sortie
     assert memoire.documents == {}
 
 
@@ -198,3 +200,22 @@ def test_generer_candidature_en_echec(monkeypatch, memoire, capsys):
     installer_fournisseurs(monkeypatch, [RuntimeError("quota épuisé")], [])
     assert analyse_ia.generer_candidature_ia(ANALYSE, "texte") == {"message_linkedin": "", "lettre_motivation": ""}
     assert "quota épuisé" in capsys.readouterr().out
+
+
+def test_abandon_mistral_indique_le_fournisseur_et_le_delai(monkeypatch, memoire, capsys):
+    def limite():
+        reponse = reponse_mistral(ANALYSE, 429)
+        reponse.headers["Retry-After"] = "42"
+        return reponse
+
+    installer_fournisseurs(monkeypatch, [ANALYSE] * 3, [limite(), limite(), limite()])
+
+    assert analyse_ia.analyser_technique_ia("texte", "https://offre") is None
+
+    sortie = capsys.readouterr().out
+    assert "Mistral : limite de requêtes atteinte (Retry-After : 42s" in sortie
+    assert "Dernière erreur — Mistral" in sortie
+
+
+def test_decrire_limite_sans_detail():
+    assert analyse_ia.decrire_limite("Groq", ValueError("x")) == "Groq : limite de requêtes atteinte"
