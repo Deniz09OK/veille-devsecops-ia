@@ -161,45 +161,68 @@ def decrire_limite(fournisseur, erreur):
     return f"{fournisseur} : limite de requêtes atteinte{complement}"
 
 
+def relire_avec_mistral(texte_offre, contexte_memoire, analyse_initiale):
+    """Relecture Mistral avec nouvelles tentatives sur rate-limit. Renvoie (analyse, dernier message de limite)."""
+    derniere_limite = ""
+    for _ in range(NB_TENTATIVES):
+        try:
+            contenu = appeler_mistral(
+                [{"role": "user", "content": construire_prompt_relecture(texte_offre, contexte_memoire, analyse_initiale)}],
+                response_format=SCHEMA_ANALYSE_FINALE,
+            )
+            return json.loads(contenu), derniere_limite
+        except requests.exceptions.HTTPError as e:
+            if e.response is None or e.response.status_code != 429:
+                print(f"   ⚠️ Erreur Mistral : {e}")
+                return None, derniere_limite
+            derniere_limite = decrire_limite("Mistral", e)
+            print(f"   ⏳ {derniere_limite}")
+            time.sleep(PAUSE_RATE_LIMIT)
+        except (ValueError, KeyError) as e:
+            print(f"   ⚠️ Réponse Mistral illisible : {e}")
+            return None, derniere_limite
+    return None, derniere_limite
+
+
 def analyser_technique_ia(texte_offre, url_offre):
+    contexte_memoire = ""
+    analyse_initiale = None
     derniere_limite = ""
     for _ in range(NB_TENTATIVES):
         try:
             contexte_memoire = rechercher_souvenir(texte_offre)
-
             analyse_initiale = appeler_groq(construire_prompt_initial(texte_offre, contexte_memoire))
-            analyse_initiale["match_tech"] = valider_match_tech(analyse_initiale.get("match_tech", "5/10"))
-            score_initial = analyse_initiale["match_tech"]
-
-            contenu_final = appeler_mistral(
-                [{"role": "user", "content": construire_prompt_relecture(texte_offre, contexte_memoire, analyse_initiale)}],
-                response_format=SCHEMA_ANALYSE_FINALE,
-            )
-            analyse_finale = json.loads(contenu_final)
-            analyse_finale["match_tech"] = valider_match_tech(analyse_finale.get("match_tech", score_initial))
-            analyse_finale["score_initial"] = score_initial
-            analyse_finale["ajustement_collaboratif"] = comparer_scores(score_initial, analyse_finale["match_tech"])
-
-            memoriser(url_offre, texte_offre, analyse_finale)
-            return analyse_finale
-
+            break
         except groq.RateLimitError as e:
             derniere_limite = decrire_limite("Groq", e)
             print(f"   ⏳ {derniere_limite}")
             time.sleep(PAUSE_RATE_LIMIT)
-        except requests.exceptions.HTTPError as e:
-            if e.response is not None and e.response.status_code == 429:
-                derniere_limite = decrire_limite("Mistral", e)
-                print(f"   ⏳ {derniere_limite}")
-                time.sleep(PAUSE_RATE_LIMIT)
-                continue
-            print(f"   ⚠️ Erreur Mistral : {e}")
-            return None
         except Exception as e:
             print(f"   ⚠️ Erreur analyse IA : {e}")
             return None
-    print(f"   ⚠️ Analyse abandonnée après plusieurs erreurs de rate-limit. Dernière erreur — {derniere_limite}")
-    return None
+    if analyse_initiale is None:
+        print(f"   ⚠️ Analyse abandonnée après plusieurs erreurs de rate-limit. Dernière erreur — {derniere_limite}")
+        return None
+
+    analyse_initiale["match_tech"] = valider_match_tech(analyse_initiale.get("match_tech", "5/10"))
+    score_initial = analyse_initiale["match_tech"]
+    try:
+        analyse_finale, derniere_limite = relire_avec_mistral(texte_offre, contexte_memoire, analyse_initiale)
+        if analyse_finale is None:
+            # Relecture indisponible : on garde l'analyse Groq plutôt que de perdre l'offre.
+            print("   ⚠️ Relecture Mistral indisponible : analyse Groq conservée sans relecture.")
+            analyse_finale = dict(analyse_initiale)
+            analyse_finale["score_initial"] = score_initial
+            analyse_finale["ajustement_collaboratif"] = "⚠️ Non relu (Mistral indisponible)"
+        else:
+            analyse_finale["match_tech"] = valider_match_tech(analyse_finale.get("match_tech", score_initial))
+            analyse_finale["score_initial"] = score_initial
+            analyse_finale["ajustement_collaboratif"] = comparer_scores(score_initial, analyse_finale["match_tech"])
+        memoriser(url_offre, texte_offre, analyse_finale)
+        return analyse_finale
+    except Exception as e:
+        print(f"   ⚠️ Erreur analyse IA : {e}")
+        return None
 
 
 def construire_prompt_candidature(analyse, texte_offre):
