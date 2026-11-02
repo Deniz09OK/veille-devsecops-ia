@@ -33,6 +33,7 @@ def generer_sources_scraping(mots_cles, localisation):
             mot_pour_url = urllib.parse.quote_plus(mot)
             sources_finales.append({
                 "nom": f"{template['nom']} - {mot}",
+                "site": template["nom"],
                 "url": template["url_template"].format(mot=mot_pour_url, loc=loc_encodee),
                 "aimant_css": template["aimant_css"],
                 "domaine": template["domaine"],

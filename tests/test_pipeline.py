@@ -1,7 +1,7 @@
 import pytest
 
 from veille import pipeline as module_pipeline
-from veille.pipeline import OffreCandidate, Pipeline, passe_les_filtres
+from veille.pipeline import OffreCandidate, Pipeline, motif_rejet, passe_les_filtres
 
 TEXTE_NANCY = "Alternance DevSecOps à Nancy. Docker, Kubernetes, GitLab CI, Terraform. Rejoignez une équipe passionnée."
 
@@ -140,3 +140,39 @@ def test_offres_triees_par_note(pipeline_isole, monkeypatch):
     pipeline.traiter(OffreCandidate(source="FT", url="fort", texte_ia="Alternance SecOps à Metz. Splunk, SIEM, EDR, réponse à incident, durcissement Linux."))
 
     assert [cle for cle, _ in pipeline.offres_triees()] == ["DevSecOps - fort", "DevSecOps - faible"]
+
+
+def test_motif_rejet_donne_la_premiere_raison():
+    assert motif_rejet(OffreCandidate(source="s", url="u", texte_ia="")) == "texte_vide"
+    assert motif_rejet(OffreCandidate(source="s", url="u", texte_ia="Alternance CESI à Nancy")) == "ecole"
+    assert motif_rejet(OffreCandidate(source="s", url="u", texte_ia="Alternance DevOps à Paris")) == "logistique"
+    assert motif_rejet(OffreCandidate(source="s", url="u", texte_ia="CDI DevOps à Nancy", verifier_contrat=True)) == "contrat"
+    assert motif_rejet(OffreCandidate(source="s", url="u", texte_ia="Métropole du Grand Nancy, alternance")) == "secteur_public"
+    assert motif_rejet(OffreCandidate(source="s", url="u", texte_ia=TEXTE_NANCY)) is None
+
+
+def test_bilan_suit_chaque_offre_par_source(pipeline_isole, monkeypatch):
+    pipeline, _ = pipeline_isole
+    pipeline.historique["https://vue"] = "2026-09-01T00:00:00"
+    pipeline.traiter(OffreCandidate(source="FT", url="", texte_ia=TEXTE_NANCY))
+    pipeline.traiter(OffreCandidate(source="FT", url="https://vue", texte_ia=TEXTE_NANCY))
+    pipeline.traiter(OffreCandidate(source="FT", url="https://paris", texte_ia="Alternance DevOps à Paris, hybride"))
+    pipeline.traiter(OffreCandidate(source="FT", url="https://a", texte_ia=TEXTE_NANCY))
+    pipeline.traiter(OffreCandidate(source="FT", url="https://b", texte_ia=TEXTE_NANCY + " "))
+    pipeline.traiter(OffreCandidate(source="scraping HW 1", site="HelloWork", url="https://c", texte_ia="Autre texte alternance Nancy " * 5))
+    monkeypatch.setattr(module_pipeline, "analyser_technique_ia", lambda texte, url: None)
+    pipeline.traiter(OffreCandidate(source="FT", url="https://d", texte_ia="Alternance Cloud à Metz. Terraform, AWS, Ansible, Vault. " * 3))
+
+    assert dict(pipeline.bilan.sources["FT"]) == {
+        "collectees": 6, "sans_url": 1, "deja_vues": 1, "logistique": 1, "analysees": 1, "doublons": 1, "analyse_echec": 1,
+    }
+    assert dict(pipeline.bilan.sources["HelloWork"]) == {"collectees": 1, "analysees": 1}
+
+
+def test_quota_atteint_laisse_une_note_dans_le_bilan(pipeline_isole):
+    pipeline, _ = pipeline_isole
+    pipeline.quota = 1
+    offres = [OffreCandidate(source="FT", url=f"https://{i}", texte_ia=f"{TEXTE_NANCY} Référence {i} {'x' * i * 40}") for i in range(3)]
+    pipeline.consommer("FT", iter(offres))
+
+    assert pipeline.bilan.notes == ["Quota de 1 analyses atteint pendant « FT » : la suite n'a pas été traitée."]

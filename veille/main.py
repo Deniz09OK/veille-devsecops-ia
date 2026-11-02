@@ -1,10 +1,11 @@
 from playwright.sync_api import sync_playwright
 
+from .bilan import Bilan
 from .collecte.france_travail import generer_recherches_ft, recuperer_offres_france_travail
 from .collecte.la_bonne_alternance import generer_recherches_lba, offre_en_full_remote, recuperer_offres_la_bonne_alternance
 from .collecte.scraping import extraire_liens, lire_texte_offre
 from .collecte.sources_scraping import SOURCES_RECHERCHE
-from .core.config import GROUPE_ID, MOTS_CLES
+from .core.config import FICHIER_BILAN, GROUPE_ID, MOTS_CLES
 from .core.constantes import USER_AGENT
 from .core.filtres import code_postal_accepte
 from .core.historique import charger_historique, ecrire_historique
@@ -47,19 +48,28 @@ def offres_la_bonne_alternance():
         )
 
 
-def offres_scraping(historique):
+def offres_scraping(historique, bilan=None):
     with sync_playwright() as p:
         navigateur = p.chromium.launch(headless=True)
         try:
             contexte = navigateur.new_context(user_agent=USER_AGENT)
             page = contexte.new_page()
             for source in SOURCES_RECHERCHE:
-                for url_brute in extraire_liens(page, source):
+                site = source.get("site", source["nom"])
+                liens = extraire_liens(page, source)
+                if bilan is not None:
+                    bilan.compter(site, "recherches")
+                    if not liens:
+                        bilan.compter(site, "recherches_vides")
+                for url_brute in liens:
                     url = normaliser_url_offre(url_brute)
                     if url in historique:
+                        if bilan is not None:
+                            bilan.compter(site, "collectees")
+                            bilan.compter(site, "deja_vues")
                         continue
                     texte = lire_texte_offre(contexte, url_brute) or ""
-                    yield OffreCandidate(source=source["nom"], url=url, texte_ia=texte, verifier_contrat=True)
+                    yield OffreCandidate(source=source["nom"], site=site, url=url, texte_ia=texte, verifier_contrat=True)
         finally:
             navigateur.close()
 
@@ -69,17 +79,23 @@ def executer():
     print(f"🚀 Démarrage — Groupe : {GROUPE_ID}...")
     appliquer_feedback_reel()
     historique = charger_historique()
-    pipeline = Pipeline(historique)
+    bilan = Bilan()
+    bilan.ouvrir("France Travail")
+    bilan.ouvrir("La Bonne Alternance")
+    pipeline = Pipeline(historique, bilan=bilan)
 
     try:
         pipeline.consommer("France Travail", offres_france_travail())
         pipeline.consommer("La Bonne Alternance", offres_la_bonne_alternance())
-        pipeline.consommer("scraping", offres_scraping(historique))
+        pipeline.consommer("scraping", offres_scraping(historique, bilan))
     finally:
         ecrire_historique(historique)
         offres_triees = pipeline.offres_triees()
         generer_rapport_markdown(offres_triees)
         generer_excel(offres_triees)
+        bilan.retenues = len(offres_triees)
+        bilan.ecrire(FICHIER_BILAN, GROUPE_ID)
+        print("\n📊 Entonnoir du run\n" + bilan.resume(GROUPE_ID))
 
     print(
         f"🎉 Terminé pour le groupe {GROUPE_ID} : {pipeline.nb_analyses} analyse(s) IA, "

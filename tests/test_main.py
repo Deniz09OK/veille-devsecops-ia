@@ -1,3 +1,5 @@
+import json
+import pathlib
 from types import SimpleNamespace
 
 import pytest
@@ -133,8 +135,9 @@ def test_offres_scraping_ferme_le_navigateur_sur_arret_anticipe(scraping_simule)
 class FauxPipeline:
     instances = []
 
-    def __init__(self, historique):
+    def __init__(self, historique, bilan=None):
         self.historique = historique
+        self.bilan = bilan
         self.consommations = []
         self.nb_analyses = 3
         self.nb_filtrees = 2
@@ -148,8 +151,9 @@ class FauxPipeline:
 
 
 @pytest.fixture
-def execution_simulee(monkeypatch):
+def execution_simulee(monkeypatch, tmp_path):
     journal = []
+    monkeypatch.setattr(main, "FICHIER_BILAN", str(tmp_path / "bilan_run.json"))
     monkeypatch.setattr(main, "appliquer_feedback_reel", lambda: journal.append("feedback"))
     monkeypatch.setattr(main, "charger_historique", lambda: {"https://vu": "2026-09-01"})
     monkeypatch.setattr(main, "ecrire_historique", lambda historique: journal.append(("historique", dict(historique))))
@@ -163,7 +167,7 @@ def execution_simulee(monkeypatch):
 
 
 def test_executer_enchaine_les_etapes(execution_simulee, monkeypatch, capsys):
-    monkeypatch.setattr(main, "offres_scraping", lambda historique: iter([]))
+    monkeypatch.setattr(main, "offres_scraping", lambda historique, bilan=None: iter([]))
 
     main.executer()
 
@@ -173,10 +177,15 @@ def test_executer_enchaine_les_etapes(execution_simulee, monkeypatch, capsys):
     assert execution_simulee == ["feedback", ("historique", {"https://vu": "2026-09-01"}), ("markdown", 1), ("excel", 1)]
     sortie = capsys.readouterr().out
     assert "3 analyse(s) IA" in sortie and "1 offre(s) retenue(s)" in sortie and "2 écartée(s)" in sortie
+    assert "Entonnoir du run" in sortie
+    assert "- France Travail : aucune offre collectée" in sortie
+    assert "- La Bonne Alternance : aucune offre collectée" in sortie
+    donnees = json.loads(pathlib.Path(main.FICHIER_BILAN).read_text(encoding="utf-8"))
+    assert donnees["retenues"] == 1 and set(donnees["sources"]) == {"France Travail", "La Bonne Alternance"}
 
 
 def test_executer_sauvegarde_meme_si_une_source_plante(execution_simulee, monkeypatch):
-    def scraping_casse(historique):
+    def scraping_casse(historique, bilan=None):
         raise RuntimeError("Chromium introuvable")
         yield
 
@@ -187,3 +196,24 @@ def test_executer_sauvegarde_meme_si_une_source_plante(execution_simulee, monkey
 
     assert ("historique", {"https://vu": "2026-09-01"}) in execution_simulee
     assert ("markdown", 1) in execution_simulee and ("excel", 1) in execution_simulee
+
+
+def test_offres_scraping_alimente_le_bilan(scraping_simule):
+    from veille.bilan import Bilan
+
+    bilan = Bilan()
+    historique = {"https://www.hellowork.com/fr-fr/emplois/2.html": "2026-09-01"}
+
+    list(main.offres_scraping(historique, bilan))
+
+    assert dict(bilan.sources["HelloWork - DevOps"]) == {"recherches": 1, "collectees": 1, "deja_vues": 1}
+
+
+def test_offres_scraping_compte_les_recherches_sans_resultat(scraping_simule, monkeypatch):
+    from veille.bilan import Bilan
+
+    monkeypatch.setattr(main, "extraire_liens", lambda page, source: [])
+    bilan = Bilan()
+
+    assert list(main.offres_scraping({}, bilan)) == []
+    assert dict(bilan.sources["HelloWork - DevOps"]) == {"recherches": 1, "recherches_vides": 1}

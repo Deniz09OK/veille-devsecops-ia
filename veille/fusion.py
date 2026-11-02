@@ -1,9 +1,11 @@
 import glob
+import json
 import os
 import sys
 
 import pandas as pd
 
+from .bilan import resume_depuis_dict
 from .core.constantes import COL_ENTREPRISE, COL_LIEN, COL_SCORE, COL_TITRE, COLONNES_RENOMMEES, FICHIER_MASTER, NOM_FEUILLE, SEUIL_CANDIDATURE
 from .core.utils import activer_console_utf8, extraire_note
 from .sortie.excel_style import appliquer_style_suivi
@@ -45,12 +47,25 @@ def ecrire_master(df, destination):
         appliquer_style_suivi(writer.sheets[NOM_FEUILLE], df, SEUIL_CANDIDATURE)
 
 
-def publier_sortie_github(total, resume):
+def resumer_bilans(dossier):
+    fichiers = sorted(glob.glob(os.path.join(dossier, "**", "bilan_run_*.json"), recursive=True))
+    resumes = []
+    for fichier in fichiers:
+        try:
+            with open(fichier, "r", encoding="utf-8") as f:
+                resumes.append(resume_depuis_dict(json.load(f)))
+        except Exception as e:
+            print(f"⚠️ Bilan ignoré ({fichier}) : {e}")
+    return "\n\n".join(resumes) or "Bilan indisponible (voir les logs des groupes)"
+
+
+def publier_sortie_github(total, resume, bilan=""):
     chemin = os.getenv("GITHUB_OUTPUT")
     if not chemin:
         return
     with open(chemin, "a", encoding="utf-8") as f:
         f.write(f"total={total}\nresume={resume}\n")
+        f.write(f"bilan<<EOF_BILAN\n{bilan}\nEOF_BILAN\n")
 
 
 def main(argv=None):
@@ -59,15 +74,16 @@ def main(argv=None):
     dossier = argv[1] if len(argv) > 1 else "resultats-bruts"
     destination = argv[2] if len(argv) > 2 else FICHIER_MASTER
 
+    bilan = resumer_bilans(dossier)
     df = fusionner(lire_excels(dossier))
     if df.empty:
         print("⚠️ Aucun Excel de groupe trouvé, Master non généré.")
-        publier_sortie_github(0, "Fichier Master indisponible (voir logs du run)")
+        publier_sortie_github(0, "Fichier Master indisponible (voir logs du run)", bilan)
         return 0
 
     ecrire_master(df, destination)
     total, resume = resumer(df)
-    publier_sortie_github(total, resume)
+    publier_sortie_github(total, resume, bilan)
     print(f"✅ Fusion terminée : {total} offre(s) au total. Meilleure : {resume}")
     return 0
 
