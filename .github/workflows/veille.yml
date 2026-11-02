@@ -126,7 +126,6 @@ jobs:
           GROUPE_ID: ${{ matrix.groupe_id }}
           MOTS_CLES_GROUPE: ${{ matrix.mots_cles }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
 
       - name: Sauvegarder l'état de la veille pour le prochain run
         if: always()

@@ -1,6 +1,6 @@
 # 🛡️ Veille DevSecOps — Agent IA & RAG
 
-Agent autonome qui automatise la recherche, le filtrage et l'évaluation technique des offres d'**alternance** DevSecOps/Cloud/Sécurité — jusqu'à recommander le bon CV et générer une ébauche de candidature. Il combine l'**API officielle France Travail** (OAuth2), le **scraping multi-plateformes** (Playwright) et une **analyse IA collaborative à deux fournisseurs** (Groq + Mistral) enrichie d'une **mémoire vectorielle persistante (RAG avec ChromaDB)**. Le pipeline tourne entièrement en autonomie via **GitHub Actions**, sans qu'aucune machine personnelle ait besoin d'être allumée.
+Agent autonome qui automatise la recherche, le filtrage et l'évaluation technique des offres d'**alternance** DevSecOps/Cloud/Sécurité — jusqu'à recommander le bon CV et générer une ébauche de candidature. Il combine l'**API officielle France Travail** (OAuth2), le **scraping multi-plateformes** (Playwright) et une **analyse IA collaborative à deux modèles** (Groq : `openai/gpt-oss-120b` + `llama-3.3-70b-versatile`) enrichie d'une **mémoire vectorielle persistante (RAG avec ChromaDB)**. Le pipeline tourne entièrement en autonomie via **GitHub Actions**, sans qu'aucune machine personnelle ait besoin d'être allumée.
 
 > 🎯 Conçu pour un étudiant en MSc Cybersécurité & Cloud à Epitech Nancy, sans permis de conduire : seules les offres en **alternance**, à **Nancy et alentours** ou en **télétravail intégral non ambigu**, passent les filtres.
 
@@ -26,9 +26,9 @@ Agent autonome qui automatise la recherche, le filtrage et l'évaluation techniq
 - 🔁 **Anti-doublons inter-runs** : mémoire de 14 jours par groupe (`historique_offres_<groupe>.json`), avec normalisation des URLs (APEC) et du code postal (comparaison stricte du département, pas une recherche de sous-chaîne)
 - 🔁 **Anti-doublons intra-run, avant l'appel IA** : une même offre postée sur plusieurs sources (ex: France Travail + La Bonne Alternance, qui resyndique souvent France Travail) est détectée par similarité de texte (`difflib`) et ne consomme qu'**une seule** analyse IA — le lien supplémentaire est simplement rattaché à l'entrée existante
 
-### Analyse IA collaborative (Groq + Mistral)
+### Analyse IA collaborative (deux modèles hébergés chez Groq)
 - 🧠 **Étape 1 — dégrossissage rapide** (Groq, `openai/gpt-oss-120b`) : note technique `/10`, points forts, technos à découvrir, verdict, titre et entreprise
-- 🔬 **Étape 2 — relecture critique** (Mistral, `mistral-small-latest`) : un second modèle, **d'un fournisseur différent**, relit l'analyse complète du premier et produit la version **finale**. Le score initial et un résumé de l'ajustement (`✅ Confirmé` / `🔧 Ajusté`) sont conservés pour traçabilité
+- 🔬 **Étape 2 — relecture critique** (Groq, `llama-3.3-70b-versatile`) : un second modèle, **d'une autre famille**, relit l'analyse complète du premier et produit la version **finale**. Le score initial et un résumé de l'ajustement (`✅ Confirmé` / `🔧 Ajusté`) sont conservés pour traçabilité
 - 🗃️ **Mémoire vectorielle RAG (ChromaDB)**, une base par groupe : chaque offre est vectorisée et comparée aux évaluations passées, injectée en **référence de calibration uniquement** (jamais recopiée telle quelle)
 - 🔄 **Boucle de feedback réel** (`feedback_candidatures.json`, versionné dans Git) : l'utilisateur y enregistre le résultat réel d'une candidature (`entretien` / `refus` / `sans_reponse` + date), reporté dans les métadonnées ChromaDB au début de chaque run. La calibration RAG (étapes 1 **et** 2) en tient compte pour recalibrer sur des résultats réels plutôt que sur la seule cohérence de l'IA avec elle-même
 - 🏢 **Nom d'entreprise fiabilisé** : pour les offres France Travail, le nom structuré fourni par l'API est utilisé en priorité plutôt que de laisser l'IA le deviner du texte libre
@@ -74,7 +74,7 @@ Agent autonome qui automatise la recherche, le filtrage et l'évaluation techniq
 │   ├── fusion.py                    #   Fusion des Excel de groupe en Master (python -m veille.fusion)
 │   ├── core/                        #   constantes (sans effet de bord), config (env + clients à la demande), filtres, historique, utils, feedback
 │   ├── collecte/                    #   France Travail, La Bonne Alternance, scraping Playwright
-│   ├── ia/                          #   Analyse IA collaborative (Groq + Mistral) + RAG
+│   ├── ia/                          #   Analyse IA collaborative (Groq, deux modèles) + RAG
 │   └── sortie/                      #   Rapport Markdown, Excel (+ excel_style), notifications Discord
 ├── tests/                           # Tests unitaires pytest (tests/fixtures : pages HTML locales pour le scraping)
 ├── requirements.txt                 # Dépendances d'exécution (requirements-dev.txt pour les tests)
@@ -132,8 +132,8 @@ Agent autonome qui automatise la recherche, le filtrage et l'évaluation techniq
                             ▼
         Étape 1 : analyse initiale (Groq, openai/gpt-oss-120b)
                             ▼
-        Étape 2 : relecture critique et correction (Mistral,
-        mistral-small-latest) → score final + traçabilité de l'ajustement
+        Étape 2 : relecture critique et correction (Groq,
+        llama-3.3-70b-versatile) → score final + traçabilité de l'ajustement
                             ▼
      Score final ≥ 8/10 ? → génération candidature (message LinkedIn
                              + lettre de motivation)
@@ -154,7 +154,6 @@ Agent autonome qui automatise la recherche, le filtrage et l'évaluation techniq
 
 - [Python 3.11+](https://www.python.org/downloads/)
 - Un compte [GroqCloud](https://console.groq.com) avec une clé API (gratuit)
-- Un compte [Mistral La Plateforme](https://console.mistral.ai) avec une clé API — plan **Experiment** (gratuit, sans carte bancaire, à sélectionner explicitement avant de générer la clé)
 - Un compte [francetravail.io](https://francetravail.io) avec une application souscrite à l'API **Offres d'emploi v2** (gratuit)
 - Un compte sur [api.apprentissage.beta.gouv.fr](https://api.apprentissage.beta.gouv.fr) avec une clé d'accès à l'API **La Bonne Alternance** (gratuit, usage non lucratif)
 - *(Optionnel)* Un webhook Discord pour les alertes
@@ -186,9 +185,8 @@ FT_CLIENT_SECRET=votre_client_secret_ici
 # Clé d'accès API La Bonne Alternance (apprentissage.beta.gouv.fr)
 LBA_API_KEY=votre_cle_api_ici
 
-# Clés API des deux fournisseurs IA
+# Clé API Groq (analyse et relecture)
 GROQ_API_KEY=votre_cle_groq_ici
-MISTRAL_API_KEY=votre_cle_mistral_ici
 
 # Alertes Discord (optionnel)
 WEBHOOK_DISCORD=votre_url_webhook_ici
@@ -204,8 +202,7 @@ Sur le repo GitHub → **Settings → Secrets and variables → Actions**, ajout
 |---|---|
 | `FT_CLIENT_ID` / `FT_CLIENT_SECRET` | API France Travail |
 | `LBA_API_KEY` | API La Bonne Alternance |
-| `GROQ_API_KEY` | Étape 1 de l'analyse IA (Groq Cloud) |
-| `MISTRAL_API_KEY` | Étape 2 de l'analyse IA (Mistral La Plateforme) |
+| `GROQ_API_KEY` | Étapes 1 et 2 de l'analyse IA (Groq Cloud) |
 | `WEBHOOK_DISCORD` | Alertes temps réel |
 | `EMAIL_USERNAME` / `EMAIL_APP_PASSWORD` | Notification e-mail de fin de pipeline (Gmail) |
 
@@ -238,7 +235,7 @@ python -m veille.fusion resultats-bruts suivi_candidatures_MASTER.xlsx
 Le workflow `.github/workflows/veille.yml` :
 1. Lance d'abord les **tests unitaires** (workflow `tests.yml` réutilisé). S'ils échouent : un e-mail d'alerte part avec la sortie complète de `pytest` en pièce jointe, et **la veille du jour est bloquée** (groupes et fusion non exécutés)
 2. Lance les 3 groupes (`secu`, `cloud-devops`, `infra-sre`) **en parallèle**, chacun avec son sous-ensemble de mots-clés
-3. Chaque groupe : applique le feedback réel connu, interroge France Travail + La Bonne Alternance + scrape les 2 plateformes, déduplique, filtre, analyse via Groq puis Mistral, associe le CV recommandé, met à jour son Excel et son historique
+3. Chaque groupe : applique le feedback réel connu, interroge France Travail + La Bonne Alternance + scrape les 2 plateformes, déduplique, filtre, analyse puis relecture via Groq, associe le CV recommandé, met à jour son Excel et son historique
 4. Une fois les 3 groupes terminés, le job `fusionner` télécharge leurs résultats et produit `suivi_candidatures_MASTER.xlsx` via `python -m veille.fusion` (même code de style Excel et même seuil que les groupes, plus de copie à synchroniser à la main)
 5. Un e-mail de fin de pipeline est envoyé avec le résumé et l'Excel Master en pièce jointe
 
@@ -246,7 +243,7 @@ Déclenchement : automatique tous les jours (`cron`), ou manuel via l'onglet **A
 
 ## 🧪 Tests
 
-Les tests ne font **aucun appel réseau** : les API, Groq, Mistral, ChromaDB, Discord et Playwright sont remplacés par des doublures (`tests/doublures.py`). Un seul test lance réellement Chromium, sur des pages HTML locales (`tests/fixtures/`), et il est ignoré si le navigateur n'est pas installé.
+Les tests ne font **aucun appel réseau** : les API, Groq, ChromaDB, Discord et Playwright sont remplacés par des doublures (`tests/doublures.py`). Un seul test lance réellement Chromium, sur des pages HTML locales (`tests/fixtures/`), et il est ignoré si le navigateur n'est pas installé.
 
 | Commande | Usage |
 |---|---|
@@ -288,7 +285,7 @@ Ce que les tests ne peuvent pas détecter : un changement de HTML sur HelloWork/
 | Pause entre deux analyses IA | `PAUSE_ENTRE_ANALYSES` (`core/constantes.py`) | 2 s |
 | Durée de mémoire anti-doublons | `JOURS_MEMOIRE` (`core/constantes.py`) | 14 jours |
 | Modèle étape 1 (dégrossissage) | `MODELE_IA` (`core/constantes.py`) | `openai/gpt-oss-120b` (Groq) |
-| Modèle étape 2 (relecture) | `MODELE_IA_VALIDATION` (`core/constantes.py`) | `mistral-small-latest` (Mistral) |
+| Modèle étape 2 (relecture) | `MODELE_IA_VALIDATION` (`core/constantes.py`) | `llama-3.3-70b-versatile` (Groq) |
 | Fichier Excel | `FICHIER_EXCEL` (`core/config.py`) | `suivi_candidatures_<groupe>.xlsx` |
 
 ## 🛠️ Stack technique
@@ -300,7 +297,7 @@ Ce que les tests ne peuvent pas détecter : un changement de HTML sur HelloWork/
 | **API La Bonne Alternance** | Agrégateur officiel d'offres d'apprentissage, par code ROME |
 | **Playwright** (Chromium headless) | Scraping des plateformes dynamiques |
 | **Groq Cloud** — `openai/gpt-oss-120b` | Analyse IA initiale (rapide, sortie JSON forcée) |
-| **Mistral La Plateforme** — `mistral-small-latest` | Relecture critique et correction (fournisseur indépendant) |
+| **Groq Cloud** — `llama-3.3-70b-versatile` | Relecture critique et correction (modèle d'une autre famille) |
 | **ChromaDB** (persistant, un par groupe, embedding ONNX intégré) | Mémoire vectorielle RAG des verdicts passés |
 | **pandas + openpyxl** | Tableaux de bord Excel (par groupe + Master fusionné) |
 | **python-dotenv** | Gestion des secrets locaux (`.env`) |
