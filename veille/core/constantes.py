@@ -43,6 +43,12 @@ MOTS_CLES_COMPLETS = [
     "Ingénieur DevOps", "Ingénieur Système et Réseau", "Ingénieur de Production IT et Release Engineer",
 ]
 
+# France Travail combine tous les mots d'un mot-clé : des intitulés longs ne renvoient rien.
+# Pour ces groupes, la recherche France Travail utilise donc des mots-clés courts.
+MOTS_CLES_FT_PAR_GROUPE = {
+    "secu": ["cybersécurité", "sécurité informatique", "SecOps", "analyste SOC", "pentest"],
+}
+
 ROME_PAR_GROUPE = {
     "secu": ["M1802"],
     "cloud-devops": ["M1801"],

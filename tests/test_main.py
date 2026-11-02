@@ -217,3 +217,15 @@ def test_offres_scraping_compte_les_recherches_sans_resultat(scraping_simule, mo
 
     assert list(main.offres_scraping({}, bilan)) == []
     assert dict(bilan.sources["HelloWork - DevOps"]) == {"recherches": 1, "recherches_vides": 1}
+
+
+@pytest.mark.parametrize("groupe, attendu", [("secu", main.MOTS_CLES_FT_PAR_GROUPE["secu"]), ("cloud-devops", ["DevOps"])])
+def test_offres_france_travail_utilise_les_mots_cles_courts_du_groupe(monkeypatch, groupe, attendu):
+    recus = []
+    monkeypatch.setattr(main, "GROUPE_ID", groupe)
+    monkeypatch.setattr(main, "MOTS_CLES", ["DevOps"])
+    monkeypatch.setattr(main, "generer_recherches_ft", lambda mots: recus.append(list(mots)) or [])
+    monkeypatch.setattr(main, "recuperer_offres_france_travail", lambda recherches: [])
+
+    assert list(main.offres_france_travail()) == []
+    assert recus == [attendu]

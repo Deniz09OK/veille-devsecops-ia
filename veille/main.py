@@ -6,7 +6,7 @@ from .collecte.la_bonne_alternance import generer_recherches_lba, offre_en_full_
 from .collecte.scraping import extraire_liens, lire_texte_offre
 from .collecte.sources_scraping import SOURCES_RECHERCHE
 from .core.config import FICHIER_BILAN, GROUPE_ID, MOTS_CLES
-from .core.constantes import USER_AGENT
+from .core.constantes import MOTS_CLES_FT_PAR_GROUPE, USER_AGENT
 from .core.filtres import code_postal_accepte
 from .core.historique import charger_historique, ecrire_historique
 from .core.utils import activer_console_utf8, normaliser_url_offre
@@ -16,7 +16,8 @@ from .sortie.rapport_excel import generer_excel, generer_rapport_markdown
 
 
 def offres_france_travail():
-    for offre in recuperer_offres_france_travail(generer_recherches_ft(MOTS_CLES)):
+    mots_cles = MOTS_CLES_FT_PAR_GROUPE.get(GROUPE_ID, MOTS_CLES)
+    for offre in recuperer_offres_france_travail(generer_recherches_ft(mots_cles)):
         entreprise = ((offre.get("entreprise") or {}).get("nom") or "").strip()
         lieu = offre.get("lieuTravail") or {}
         texte = offre.get("description") or ""

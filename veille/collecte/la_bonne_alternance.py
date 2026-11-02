@@ -27,6 +27,7 @@ def offre_en_full_remote(offre):
 def recuperer_offres_la_bonne_alternance(recherches):
     print("🎓 Interrogation de l'API La Bonne Alternance...")
     if not LBA_API_KEY:
+        print("   ⚠️ La Bonne Alternance : clé LBA_API_KEY absente ou vide, étape ignorée (vérifier le secret GitHub).")
         return []
     headers = {"Authorization": f"Bearer {LBA_API_KEY}"}
     offres_uniques = {}
@@ -36,12 +37,21 @@ def recuperer_offres_la_bonne_alternance(recherches):
             if reponse.status_code != 200:
                 print(f"   ⚠️ La Bonne Alternance ({nom_recherche}) : HTTP {reponse.status_code}")
                 continue
-            for offre in reponse.json().get("jobs", []):
+            corps = reponse.json()
+            jobs = corps.get("jobs") if isinstance(corps, dict) else None
+            if jobs is None:
+                cles = sorted(corps)[:5] if isinstance(corps, dict) else type(corps).__name__
+                print(f"   ⚠️ La Bonne Alternance ({nom_recherche}) : réponse sans clé « jobs » (reçu : {cles}).")
+                continue
+            conservees = 0
+            for offre in jobs:
                 if nom_recherche == "nationale" and not offre_en_full_remote(offre):
                     continue
                 identifiant = (offre.get("identifier") or {}).get("id") or (offre.get("apply") or {}).get("url")
                 if identifiant:
                     offres_uniques[identifiant] = offre
+                    conservees += 1
+            print(f"   ↳ La Bonne Alternance ({nom_recherche}) : {len(jobs)} offre(s) reçue(s), {conservees} conservée(s).")
         except (requests.RequestException, ValueError) as e:
             print(f"   ⚠️ Erreur La Bonne Alternance ({nom_recherche}) : {e}")
     return list(offres_uniques.values())
