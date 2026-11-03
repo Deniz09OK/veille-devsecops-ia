@@ -155,8 +155,12 @@ def test_generer_sources_scraping():
     assert len(sources) == len(SOURCES_TEMPLATES) * 2
     premiere = sources[0]
     assert premiere["nom"] == "HelloWork - Nancy & Alentours - DevOps"
-    assert premiere["url"] == "https://www.hellowork.com/fr-fr/emploi/recherche.html?k=DevOps&l=Nancy&rayon=10"
+    assert premiere["url"] == "https://www.hellowork.com/fr-fr/emploi/recherche.html?k=DevOps&l=Nancy&ray=20&c=Alternance&st=date"
     assert premiere["domaine"] == "https://www.hellowork.com"
     assert "k=Ing%C3%A9nieur+Cloud" in sources[1]["url"]
     assert all(source["aimant_css"] for source in sources)
+    urls_hellowork = [source["url"] for source in sources if source["site"].startswith("HelloWork")]
+    assert len(urls_hellowork) == 4
+    assert all("c=Alternance" in url and "st=date" in url for url in urls_hellowork)
+    assert "mode_travail=full_remote" in sources[2]["url"]
     assert generer_sources_scraping([], "Nancy") == []
