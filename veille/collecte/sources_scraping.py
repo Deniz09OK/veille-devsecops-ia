@@ -3,16 +3,18 @@ import urllib.parse
 from ..core.config import MOTS_CLES
 from ..core.constantes import LOCALISATION
 
+# Paramètres HelloWork (relevés dans l'URL de recherche du site) : c = type de contrat, st = tri
+# (relevance / date), ray = rayon en km autour de la localité (ou « all »).
 SOURCES_TEMPLATES = [
     {
         "nom": "HelloWork - Nancy & Alentours",
-        "url_template": "https://www.hellowork.com/fr-fr/emploi/recherche.html?k={mot}&l={loc}&rayon=10",
+        "url_template": "https://www.hellowork.com/fr-fr/emploi/recherche.html?k={mot}&l={loc}&ray=20&c=Alternance&st=date",
         "aimant_css": 'a[href*="/emplois/"]',
         "domaine": "https://www.hellowork.com",
     },
     {
         "nom": "HelloWork - Full Remote",
-        "url_template": "https://www.hellowork.com/fr-fr/emploi/recherche.html?k={mot}&ray=all&mode_travail=full_remote",
+        "url_template": "https://www.hellowork.com/fr-fr/emploi/recherche.html?k={mot}&ray=all&mode_travail=full_remote&c=Alternance&st=date",
         "aimant_css": 'a[href*="/emplois/"]',
         "domaine": "https://www.hellowork.com",
     },
