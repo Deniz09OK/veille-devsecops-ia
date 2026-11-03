@@ -161,6 +161,7 @@ def test_generer_sources_scraping():
     assert all(source["aimant_css"] for source in sources)
     urls_hellowork = [source["url"] for source in sources if source["site"].startswith("HelloWork")]
     assert len(urls_hellowork) == 4
+    assert len(sources) == 4  # APEC retiré
     assert all("c=Alternance" in url and "st=date" in url for url in urls_hellowork)
     assert "mode_travail=full_remote" in sources[2]["url"]
     assert generer_sources_scraping([], "Nancy") == []

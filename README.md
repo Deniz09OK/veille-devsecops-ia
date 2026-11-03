@@ -11,7 +11,7 @@ Agent autonome qui automatise la recherche, le filtrage et l'évaluation techniq
 ### Recherche & collecte
 - 🌍 **API France Travail (Offres d'emploi v2)** : OAuth2 *client credentials*, recherches ciblées Nancy 30 km + France entière par mot-clé, filtrées `natureContrat=E2` (alternance)
 - 🎓 **API La Bonne Alternance** (`api.apprentissage.beta.gouv.fr`) : agrégateur officiel de l'État dédié à l'alternance (France Travail + CFA + entreprises), interrogé par **code ROME** plutôt que mot-clé — une recherche locale (départements 54/57/55/88) et une recherche nationale filtrée aux offres en télétravail intégral (champ `contract.remote` fourni par l'API, plus fiable que la détection texte). Ne renvoie que des offres d'apprentissage/professionnalisation par construction
-- 🔎 **Scraping multi-sources** : HelloWork, APEC — chaque plateforme est interrogée automatiquement pour **chaque mot-clé** configuré. Indeed, Welcome to the Jungle et Choose Your Boss ont été retirés : les trois sont protégées par Cloudflare (blocage systématique pour les deux premiers ; blocage de session dès la 2e requête rapprochée, persistant même avec 10s de pause, pour le troisième) — voir historique Git pour le détail de chaque investigation
+- 🔎 **Scraping HelloWork** (alternance, triées par date) — APEC a été retiré (page bloquée, timeout systématique) — chaque plateforme est interrogée automatiquement pour **chaque mot-clé** configuré. Indeed, Welcome to the Jungle et Choose Your Boss ont été retirés : les trois sont protégées par Cloudflare (blocage systématique pour les deux premiers ; blocage de session dès la 2e requête rapprochée, persistant même avec 10s de pause, pour le troisième) — voir historique Git pour le détail de chaque investigation
 - 🩺 **Diagnostic automatique des blocages de scraping** : capture d'écran (une par domaine et par run) en cas d'échec réellement anormal, uploadée en artefact CI (`debug_screenshots/`) — un simple "0 résultat" pour une recherche pointue n'est plus confondu avec un vrai blocage/site cassé
 - 🔑 **Mots-clés paramétrables** : liste centrale (`MOTS_CLES_COMPLETS`) couvrant SecOps, Cloud Security Engineer, DevSecOps, DevOps, SRE, Ingénieur Cloud, etc.
 
@@ -113,7 +113,7 @@ Agent autonome qui automatise la recherche, le filtrage et l'évaluation techniq
                             ▼
 ┌─ MOTEUR 1 ─────────┐  ┌─ MOTEUR 2 ─────────────┐  ┌─ MOTEUR 3 ──────────────────────┐
 │ API France Travail │  │ API La Bonne Alternance│  │ Scraping Playwright              │
-│ (OAuth2), par      │  │ par code ROME du       │  │ (HelloWork, APEC)                │
+│ (OAuth2), par      │  │ par code ROME du       │  │ (HelloWork)                      │
 │ mot-clé du groupe  │  │ groupe (local + remote)│  │                                   │
 └──────────┬──────────┘  └───────────┬────────────┘  └────────────────┬─────────────────┘
            └──────────────────────────┬─────────────────────────────────┘
@@ -255,7 +255,7 @@ Les tests ne font **aucun appel réseau** : les API, Groq, ChromaDB, Discord et 
 
 Ce qui est couvert : filtres, notes, utilitaires, historique, feedback, configuration, collecte (France Travail, La Bonne Alternance, scraping), analyse IA (prompts, mémoire RAG, retries), pipeline, rapport Markdown, Excel, Discord, fusion Master et point d'entrée.
 
-Ce que les tests ne peuvent pas détecter : un changement de HTML sur HelloWork/APEC ou une évolution des API. Pour ça, seul un vrai run compte (`workflow_dispatch`, ou lancement local avec le `.env`).
+Ce que les tests ne peuvent pas détecter : un changement de HTML sur HelloWork ou une évolution des API. Pour ça, seul un vrai run compte (`workflow_dispatch`, ou lancement local avec le `.env`).
 
 ### Avant chaque push (hook local)
 
