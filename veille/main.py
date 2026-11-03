@@ -1,6 +1,6 @@
 from playwright.sync_api import sync_playwright
 
-from .bilan import Bilan
+from .bilan import Bilan, resume_exemples
 from .collecte.france_travail import generer_recherches_ft, recuperer_offres_france_travail
 from .collecte.la_bonne_alternance import generer_recherches_lba, offre_en_full_remote, recuperer_offres_la_bonne_alternance
 from .collecte.scraping import extraire_liens, lire_texte_offre
@@ -97,6 +97,8 @@ def executer():
         bilan.retenues = len(offres_triees)
         bilan.ecrire(FICHIER_BILAN, GROUPE_ID)
         print("\n📊 Entonnoir du run\n" + bilan.resume(GROUPE_ID))
+        if bilan.exemples:
+            print("\n🔍 Exemples d'offres écartées (5 par motif)\n" + resume_exemples(bilan.exemples))
 
     print(
         f"🎉 Terminé pour le groupe {GROUPE_ID} : {pipeline.nb_analyses} analyse(s) IA, "

@@ -1,6 +1,6 @@
 import json
 
-from veille.bilan import Bilan, resume_depuis_dict
+from veille.bilan import resume_exemples, extrait_offre, Bilan, resume_depuis_dict
 
 
 def test_bilan_compte_et_resume_par_source():
@@ -43,3 +43,11 @@ def test_bilan_ecrit_un_json_relisible(tmp_path):
 
 def test_resume_depuis_dict_tolere_un_json_incomplet():
     assert resume_depuis_dict({}) == "Groupe ? : 0 nouvelle(s) offre(s) retenue(s)"
+
+
+def test_resume_exemples_et_extrait_tronque():
+    assert extrait_offre("  a \n b  " + "x" * 300) == ("a b " + "x" * 300)[:120]
+    texte = resume_exemples({"ecole": [{"site": "HelloWork", "url": "https://u", "extrait": "Titre"}], "inconnu": []})
+    assert "- école concurrente :" in texte
+    assert "• [HelloWork] Titre — https://u" in texte
+    assert "- inconnu :" in texte

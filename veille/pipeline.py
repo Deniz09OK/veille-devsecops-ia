@@ -80,6 +80,7 @@ class Pipeline:
         if motif:
             self.nb_filtrees += 1
             self.bilan.compter(site, motif)
+            self.bilan.garder_exemple(site, motif, offre.url, offre.texte_verif)
             self._marquer_vue(offre.url)
             return
 

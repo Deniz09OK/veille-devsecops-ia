@@ -176,3 +176,14 @@ def test_quota_atteint_laisse_une_note_dans_le_bilan(pipeline_isole):
     pipeline.consommer("FT", iter(offres))
 
     assert pipeline.bilan.notes == ["Quota de 1 analyses atteint pendant « FT » : la suite n'a pas été traitée."]
+
+
+def test_exemples_d_offres_ecartees_limites_par_motif(pipeline_isole):
+    pipeline, _ = pipeline_isole
+    for i in range(7):
+        pipeline.traiter(OffreCandidate(source="HW", site="HelloWork", url=f"https://paris/{i}", texte_ia=f"Alternance DevOps à Paris, hybride {i}"))
+
+    exemples = pipeline.bilan.exemples["logistique"]
+    assert len(exemples) == 5
+    assert exemples[0] == {"site": "HelloWork", "url": "https://paris/0", "extrait": "Alternance DevOps à Paris, hybride 0"}
+    assert pipeline.bilan.en_dict("g")["exemples_ecartees"]["logistique"] == exemples

@@ -17,6 +17,23 @@ ETAPES = [
 ]
 
 
+MAX_EXEMPLES_PAR_MOTIF = 5
+TAILLE_EXTRAIT = 120
+
+
+def extrait_offre(texte):
+    return " ".join((texte or "").split())[:TAILLE_EXTRAIT]
+
+
+def resume_exemples(exemples):
+    libelles = dict(ETAPES)
+    lignes = []
+    for motif, offres in exemples.items():
+        lignes.append(f"- {libelles.get(motif, motif)} :")
+        lignes.extend(f"    • [{o['site']}] {o['extrait']} — {o['url']}" for o in offres)
+    return "\n".join(lignes)
+
+
 def resume_source(site, compteurs):
     parties = []
     recherches = compteurs.get("recherches", 0)
@@ -43,6 +60,7 @@ class Bilan:
         self.sources = {}
         self.notes = []
         self.retenues = 0
+        self.exemples = {}
 
     def ouvrir(self, site):
         self.sources.setdefault(site, Counter())
@@ -50,6 +68,12 @@ class Bilan:
     def compter(self, site, etape, n=1):
         self.ouvrir(site)
         self.sources[site][etape] += n
+
+    def garder_exemple(self, site, motif, url, texte):
+        """Conserve quelques offres écartées par motif, pour pouvoir juger les filtres."""
+        offres = self.exemples.setdefault(motif, [])
+        if len(offres) < MAX_EXEMPLES_PAR_MOTIF:
+            offres.append({"site": site, "url": url, "extrait": extrait_offre(texte)})
 
     def noter(self, message):
         if message not in self.notes:
@@ -68,6 +92,7 @@ class Bilan:
             "retenues": self.retenues,
             "notes": self.notes,
             "sources": {site: dict(compteurs) for site, compteurs in self.sources.items()},
+            "exemples_ecartees": self.exemples,
         }
 
     def ecrire(self, chemin, groupe):
