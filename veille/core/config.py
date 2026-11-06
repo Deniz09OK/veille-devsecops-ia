@@ -18,7 +18,6 @@ FT_CLIENT_ID = _variable("FT_CLIENT_ID")
 FT_CLIENT_SECRET = _variable("FT_CLIENT_SECRET")
 LBA_API_KEY = _variable("LBA_API_KEY")
 GROQ_API_KEY = _variable("GROQ_API_KEY")
-MISTRAL_API_KEY = _variable("MISTRAL_API_KEY")
 
 GROUPE_ID = _variable("GROUPE_ID") or "default"
 

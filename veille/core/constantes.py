@@ -4,7 +4,7 @@ MAX_ANALYSES_PAR_RUN = 15
 PAUSE_ENTRE_ANALYSES = 2
 SEUIL_DISTANCE_RAG = 1.0
 MODELE_IA = "openai/gpt-oss-120b"
-MODELE_IA_VALIDATION = "mistral-small-latest"
+MODELE_IA_VALIDATION = "llama-3.3-70b-versatile"
 NOM_COLLECTION_RAG = "memoire_devsecops_v2"
 
 LOCALISATION = "Nancy"

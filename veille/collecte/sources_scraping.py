@@ -16,12 +16,6 @@ SOURCES_TEMPLATES = [
         "aimant_css": 'a[href*="/emplois/"]',
         "domaine": "https://www.hellowork.com",
     },
-    {
-        "nom": "APEC",
-        "url_template": "https://www.apec.fr/candidat/recherche-emploi.html/emploi?motsCles={mot}&typesContrat=172",
-        "aimant_css": 'a[href*="/detail-offre/"]',
-        "domaine": "https://www.apec.fr",
-    },
 ]
 
 

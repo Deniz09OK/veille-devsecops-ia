@@ -2,9 +2,8 @@ import json
 import time
 
 import groq
-import requests
 
-from ..core.config import MISTRAL_API_KEY, client_groq, collection_memoire
+from ..core.config import client_groq, collection_memoire
 from ..core.constantes import MODELE_IA, MODELE_IA_VALIDATION, PROFIL_CANDIDAT, SEUIL_DISTANCE_RAG
 from ..core.feedback import charger_feedback
 from ..core.utils import comparer_scores, normaliser_champ, valider_match_tech
@@ -13,27 +12,6 @@ TAILLE_MAX_DOCUMENT = 3000
 TAILLE_MAX_PROMPT = 4000
 NB_TENTATIVES = 3
 PAUSE_RATE_LIMIT = 20
-
-SCHEMA_ANALYSE_FINALE = {
-    "type": "json_schema",
-    "json_schema": {
-        "name": "analyse_offre",
-        "strict": True,
-        "schema": {
-            "type": "object",
-            "properties": {
-                "titre_poste": {"type": "string"},
-                "nom_entreprise": {"type": "string"},
-                "match_tech": {"type": "string", "pattern": r"^\d{1,2}(\.\d)?/10$"},
-                "points_forts": {"type": "string"},
-                "a_decouvrir": {"type": "string"},
-                "verdict": {"type": "string"},
-            },
-            "required": ["titre_poste", "nom_entreprise", "match_tech", "points_forts", "a_decouvrir", "verdict"],
-            "additionalProperties": False,
-        },
-    },
-}
 
 
 def appliquer_feedback_reel():
@@ -58,22 +36,6 @@ def appliquer_feedback_reel():
             print(f"   ⚠️ Erreur application feedback pour {url} : {e}")
 
 
-def appeler_mistral(messages, response_format=None):
-    reponse = requests.post(
-        "https://api.mistral.ai/v1/chat/completions",
-        headers={"Authorization": f"Bearer {MISTRAL_API_KEY}", "Content-Type": "application/json"},
-        json={
-            "model": MODELE_IA_VALIDATION,
-            "messages": messages,
-            "response_format": response_format or {"type": "json_object"},
-            "temperature": 0.2,
-        },
-        timeout=60,
-    )
-    reponse.raise_for_status()
-    return reponse.json()["choices"][0]["message"]["content"]
-
-
 def appeler_groq(prompt, temperature=0.2):
     reponse = client_groq().chat.completions.create(
         model=MODELE_IA,
@@ -82,6 +44,16 @@ def appeler_groq(prompt, temperature=0.2):
         temperature=temperature,
     )
     return json.loads(reponse.choices[0].message.content)
+
+
+def appeler_groq_relecture(prompt):
+    reponse = client_groq().chat.completions.create(
+        model=MODELE_IA_VALIDATION,
+        messages=[{"role": "user", "content": prompt}],
+        response_format={"type": "json_object"},
+        temperature=0.2,
+    )
+    return reponse.choices[0].message.content
 
 
 def construire_contexte_memoire(meta_similaire):
@@ -156,9 +128,8 @@ def analyser_technique_ia(texte_offre, url_offre):
             analyse_initiale["match_tech"] = valider_match_tech(analyse_initiale.get("match_tech", "5/10"))
             score_initial = analyse_initiale["match_tech"]
 
-            contenu_final = appeler_mistral(
-                [{"role": "user", "content": construire_prompt_relecture(texte_offre, contexte_memoire, analyse_initiale)}],
-                response_format=SCHEMA_ANALYSE_FINALE,
+            contenu_final = appeler_groq_relecture(
+                construire_prompt_relecture(texte_offre, contexte_memoire, analyse_initiale)
             )
             analyse_finale = json.loads(contenu_final)
             analyse_finale["match_tech"] = valider_match_tech(analyse_finale.get("match_tech", score_initial))
@@ -170,12 +141,6 @@ def analyser_technique_ia(texte_offre, url_offre):
 
         except groq.RateLimitError:
             time.sleep(PAUSE_RATE_LIMIT)
-        except requests.exceptions.HTTPError as e:
-            if e.response is not None and e.response.status_code == 429:
-                time.sleep(PAUSE_RATE_LIMIT)
-                continue
-            print(f"   ⚠️ Erreur Mistral : {e}")
-            return None
         except Exception as e:
             print(f"   ⚠️ Erreur analyse IA : {e}")
             return None
